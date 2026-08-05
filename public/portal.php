@@ -11,11 +11,7 @@ require __DIR__ . '/../bootstrap.php';
 (new Guard())->requireLogin();
 
 $name = SessionContract::name() ?? '';
-
-$projects = [
-    ['label' => 'Lịch kế hoạch',   'url' => '/lichkehoach/public/'],
-    ['label' => 'Nhân sự HTĐB',    'url' => '/nhansuhtdb/'],
-];
+$projects = EnvConfig::projects();
 ?>
 <!DOCTYPE html>
 <html lang="vi">
@@ -43,8 +39,8 @@ $projects = [
             <h1>Xin chào<?= $name !== '' ? ', ' . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') : '' ?></h1>
             <p class="sub">Chọn hệ thống để tiếp tục — bạn đã đăng nhập một lần cho tất cả.</p>
             <ul>
-                <?php foreach ($projects as $p): ?>
-                    <li><a href="<?= htmlspecialchars($p['url'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($p['label'], ENT_QUOTES, 'UTF-8') ?></a></li>
+                <?php foreach ($projects as $url => $label): ?>
+                    <li><a href="<?= htmlspecialchars($url, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($label, ENT_QUOTES, 'UTF-8') ?></a></li>
                 <?php endforeach; ?>
             </ul>
             <a class="logout" href="<?= htmlspecialchars(EnvConfig::logoutUrl(), ENT_QUOTES, 'UTF-8') ?>">Đăng xuất</a>

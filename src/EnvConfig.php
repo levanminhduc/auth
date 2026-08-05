@@ -59,14 +59,96 @@ final class EnvConfig
         return self::baseUrl() . '/index.php';
     }
 
-    public static function logoutUrl(): string
+    public static function logoutUrl(?string $redirect = null): string
     {
-        return self::baseUrl() . '/logout.php';
+        $url = self::baseUrl() . '/logout.php';
+        if ($redirect !== null && $redirect !== '') {
+            $url .= '?redirect=' . rawurlencode($redirect);
+        }
+        return $url;
     }
 
     public static function portalUrl(): string
     {
         return self::baseUrl() . '/portal.php';
+    }
+
+    /**
+     * Các dự án được phép nhận redirect, dạng `prefix path => nhãn hiển thị`.
+     * Đây là allowlist DUY NHẤT cho `?redirect=`; path nào không khớp prefix nào ở đây đều bị loại.
+     * Env `SHARED_AUTH_PROJECTS`: `/nhansuhtdb/|Nhân sự HTĐB,/lichkehoach/public/|Lịch kế hoạch`
+     *
+     * @return array<string, string>
+     */
+    public static function projects(): array
+    {
+        $raw = getenv('SHARED_AUTH_PROJECTS');
+        if ($raw === false || trim($raw) === '') {
+            return [
+                '/lichkehoach/public/' => 'Lịch kế hoạch',
+                '/nhansuhtdb/'         => 'Nhân sự HTĐB',
+            ];
+        }
+
+        $projects = [];
+        foreach (explode(',', $raw) as $entry) {
+            $parts = explode('|', $entry, 2);
+            $prefix = trim($parts[0]);
+            if ($prefix === '' || $prefix[0] !== '/') {
+                continue;
+            }
+            if (!str_ends_with($prefix, '/')) {
+                $prefix .= '/';
+            }
+            $label = trim($parts[1] ?? '');
+            $projects[$prefix] = ($label !== '') ? $label : $prefix;
+        }
+        return $projects;
+    }
+
+    /**
+     * Host tuyệt đối được phép trong `?redirect=`, ngoài chính host đang phục vụ request.
+     * Mặc định rỗng: chỉ chấp nhận redirect cùng host (đúng mô hình shared session cùng host).
+     *
+     * @return list<string>
+     */
+    public static function allowedHosts(): array
+    {
+        $raw = getenv('SHARED_AUTH_ALLOWED_HOSTS');
+        if ($raw === false || trim($raw) === '') {
+            return [];
+        }
+
+        $hosts = [];
+        foreach (explode(',', $raw) as $host) {
+            $host = strtolower(trim($host));
+            if ($host !== '') {
+                $hosts[] = $host;
+            }
+        }
+        return $hosts;
+    }
+
+    public static function projectLabel(?string $url): ?string
+    {
+        if ($url === null || $url === '') {
+            return null;
+        }
+
+        $path = parse_url($url, PHP_URL_PATH);
+        if (!is_string($path)) {
+            return null;
+        }
+
+        $best = null;
+        $bestLength = 0;
+        foreach (self::projects() as $prefix => $label) {
+            if (str_starts_with($path, $prefix) && strlen($prefix) > $bestLength) {
+                $best = $label;
+                $bestLength = strlen($prefix);
+            }
+        }
+        return $best;
     }
 
     public static function sessionSavePath(): ?string

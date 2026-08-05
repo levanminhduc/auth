@@ -55,4 +55,5 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $csrf = (string) $_SESSION['_csrf'];
 $portalUrl = EnvConfig::portalUrl();
+$originLabel = EnvConfig::projectLabel($redirectTarget);
 require __DIR__ . '/../views/login.php';
