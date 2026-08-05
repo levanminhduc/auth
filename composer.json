@@ -1,0 +1,17 @@
+{
+    "name": "hoatho/shared-auth",
+    "description": "Xác thực & phiên đăng nhập dùng chung cho các dự án PHP cùng host (SSO nội bộ, lazy hash-on-login).",
+    "type": "library",
+    "license": "proprietary",
+    "require": {
+        "php": ">=8.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Hoatho\\SharedAuth\\": "src/"
+        }
+    },
+    "config": {
+        "optimize-autoloader": true
+    }
+}
