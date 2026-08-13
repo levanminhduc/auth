@@ -92,6 +92,26 @@ composer dump-autoload      # sinh vendor/autoload.php (không bắt buộc — 
 Mở `http://localhost/authV2/public/` → đăng nhập bằng tài khoản trong `mysqli.user`.
 Đã đăng nhập rồi mở lại sẽ được đưa thẳng tới portal (hiệu ứng SSO).
 
+## Chạy test
+
+```
+php tests/run.php          # toàn bộ
+php tests/run.php unit     # chỉ unit
+php tests/run.php http     # chỉ smoke HTTP
+```
+
+PHP thuần, không cần cài gì thêm. Exit code khác 0 khi có test hỏng.
+
+Test cần MySQL sẽ **SKIP** thay vì fail nếu không kết nối được; chỉnh bằng `AUTHV2_TEST_DB_HOST`,
+`AUTHV2_TEST_DB_USER`, `AUTHV2_TEST_DB_PASS`, `AUTHV2_TEST_DB_NAME` (mặc định `localhost`/`root`/rỗng/`mysqli`).
+
+Test xác thực chạy trên bảng tạm `_authv2_test_user`, không đụng bảng `user`. Riêng smoke HTTP thêm
+một user tạm `__authv2_http_test__` vào `user` rồi xoá ở cuối, vì `public/index.php` cố định bảng `user`.
+
+Nhiều khẳng định trong bộ test được đánh dấu `BASELINE` — chúng chốt hành vi **hiện tại** kể cả khi
+hành vi đó sai, để các task của change `auth-hardening` lật chúng một cách có chủ ý. Test `BASELINE`
+chuyển từ xanh sang đỏ là dấu hiệu tốt khi đúng task đó đang được làm, và là dấu hiệu xấu ở mọi lúc khác.
+
 ## Điểm bất biến khi migrate password (đừng đảo thứ tự)
 
 1. Mọi điểm ĐỌC password phải hiểu cả plaintext lẫn bcrypt **trước** khi bất kỳ đâu GHI hash.
