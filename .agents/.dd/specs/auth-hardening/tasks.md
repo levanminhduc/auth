@@ -37,13 +37,15 @@
       không để header client hạ được cờ
 - [ ] 2.3 `Guard::requireLogin()` tự gọi `SessionBootstrap::start()` trước khi đọc trạng thái — chặn
       vòng lặp 302 ở dự án chạy `auto_prepend_file` chỉ `configure()`
-- [ ] 2.4 Bảng `auth_login_attempt` (username, ip, số lần, khoá tới) + lớp đếm/khoá theo cặp
+- [x] 2.4 Bảng `auth_login_attempt` (username, ip, số lần, khoá tới) + lớp đếm/khoá theo cặp
       (username, IP), nhận `mysqli` từ ngoài. Ngưỡng + thời gian khoá qua env, mặc định 10 lần / 15 phút
+      → làm ở change `login-redesign`. bảng `auth_login_attempts`, 5 lần/15 phút theo Product.md, cấu hình qua `login_config.php` thay vì env; audit log 2.5 chưa làm
 - [ ] 2.5 Bảng `auth_audit_log` + lớp ghi vết: thành công / sai mật khẩu / không có tài khoản / bị khoá
       / đăng xuất, kèm `user_id` khi có, IP, thời điểm. **Không bao giờ ghi mật khẩu.** Lỗi ghi log đi
       vào `error_log` và không chặn login
-- [ ] 2.6 Nối 2.4 + 2.5 vào `public/index.php` và `public/logout.php`; đang bị khoá thì từ chối kể cả
+- [x] 2.6 Nối 2.4 + 2.5 vào `public/index.php` và `public/logout.php`; đang bị khoá thì từ chối kể cả
       khi mật khẩu đúng, và thông báo không tiết lộ tài khoản có tồn tại hay không
+      → làm ở change `login-redesign` (phần throttle). bảng `auth_login_attempts`, 5 lần/15 phút theo Product.md, cấu hình qua `login_config.php` thay vì env; audit log 2.5 chưa làm
 - [ ] 2.7 Sửa `README.md` + `specs/shared-auth/capabilities/shared-session.md` cho khớp quyết định 1
       (bỏ lời hứa MySQL session handler, thay bằng save_path riêng + fail-fast)
 - [ ] 2.8 **Cổng**: test nhóm 1 xanh + test mới cho 2.1–2.6; thử tay trên local: dò sai quá ngưỡng bị
@@ -63,7 +65,8 @@
       `password_needs_rehash` chịu chung công tắc `SHARED_AUTH_UPGRADE_ON_LOGIN` (đang TẮT → không ghi gì)
 - [ ] 3.6 `CredentialVerifier` chỉ SELECT cột cần (`id`, `name`, `password`) thay `SELECT *`; trả về
       đúng `id` + `name`
-- [ ] 3.7 Thông báo lỗi login giống hệt nhau giữa "sai mật khẩu" và "không có tài khoản"
+- [x] 3.7 Thông báo lỗi login giống hệt nhau giữa "sai mật khẩu" và "không có tài khoản"
+      → làm ở change `login-redesign` (đã đúng từ trước, có test)
 - [ ] 3.8 Trần tuyệt đối: `SHARED_AUTH_ABSOLUTE_LIFETIME` (mặc định 30 ngày, `0` = tắt), kiểm trong
       `SessionContract::isLoggedIn()` dựa trên `logged_in_at`
 - [ ] 3.9 **Cổng**: test xanh + chạy lại kiểm thử chéo thật như task 2.5/2.7 của `shared-auth`
@@ -71,14 +74,17 @@
 
 ## 4. Nhóm C — trang login & cấu hình
 
-- [ ] 4.1 Gửi security header bằng HTTP header thay `<meta http-equiv>`: CSP có `frame-ancestors`,
+- [x] 4.1 Gửi security header bằng HTTP header thay `<meta http-equiv>`: CSP có `frame-ancestors`,
       `Referrer-Policy`, `X-Content-Type-Options`; giữ `login_config.php` làm nơi khai báo
-- [ ] 4.2 Bootstrap + FontAwesome: self-host vào `public/assets/vendor/` (ưu tiên) hoặc thêm
+      → làm ở change `login-redesign`. làm theo hướng khác: CSP hằng cứng trong `index.php`, bỏ config `csp` theo Product.md mục 8
+- [x] 4.2 Bootstrap + FontAwesome: self-host vào `public/assets/vendor/` (ưu tiên) hoặc thêm
       `integrity` + `crossorigin`; cập nhật CSP cho khớp lựa chọn
+      → làm ở change `login-redesign`. chọn gỡ hẳn thay vì self-host
 - [ ] 4.3 `config/db.php`: đường dẫn cấu hình qua env, bỏ hardcode `C:/xampp/config/db.php`; thiếu
       cấu hình thì dừng với lỗi rõ ràng, bỏ fallback `root` / mật khẩu rỗng
-- [ ] 4.4 Gỡ liên kết "Quên mật khẩu?" (`href="#"`); đổi nhãn "Ghi nhớ đăng nhập" cho đúng việc nó làm
+- [x] 4.4 Gỡ liên kết "Quên mật khẩu?" (`href="#"`); đổi nhãn "Ghi nhớ đăng nhập" cho đúng việc nó làm
       (chỉ nhớ tên đăng nhập trên trình duyệt này)
+      → làm ở change `login-redesign`
 - [ ] 4.5 **Cổng**: mở trang login kiểm header thật trả về, thử nhúng iframe bị chặn, test 1.3 vẫn xanh
 
 ## 5. Nhóm D — dọn dẹp

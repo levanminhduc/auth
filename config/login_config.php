@@ -4,29 +4,26 @@ declare(strict_types=1);
 
 return [
     'app' => [
-        'name' => 'HỆ THỐNG QUẢN LÝ NHÂN SỰ',
-        'company' => 'CÔNG TY MAY HOÀ THỌ ĐIỆN BÀN',
-        'logo_path' => 'img/logoht.png',
-        'logo_width' => 100,
-        'logo_height' => 100,
-        'logo_alt' => 'Hoa Tho Logo',
+        'name'        => 'HỆ THỐNG QUẢN LÝ NHÂN SỰ',
+        'company'     => 'CÔNG TY MAY HOÀ THỌ ĐIỆN BÀN',
+        'logo_path'   => 'img/logoht.png',
+        'logo_width'  => 88,
+        'logo_height' => 81,
+        'logo_alt'    => 'Logo Hoà Thọ',
     ],
-
-    'csp' => [
-        'enabled' => true,
-        'directives' => [
-            'default-src' => "'self'",
-            'script-src' => "'self' https://cdn.jsdelivr.net",
-            'style-src' => "'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com",
-            'img-src' => "'self' data:",
-            'font-src' => "'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com",
-        ],
-    ],
-
     'ui' => [
-        'show_forgot_password' => true,
-        'show_remember_me' => true,
-        'alert_auto_dismiss_seconds' => 5,
-        'show_copyright' => true,
+        'show_forgot_password' => false,
+        'forgot_password_url'  => '',
+        'show_remember_me'     => true,
+        'show_copyright'       => true,
+        'remember_days'        => 30,
+    ],
+    'throttle' => [
+        'enabled'         => true,
+        'max_attempts'    => 5,
+        'window_minutes'  => 15,
+        'lockout_minutes' => 15,
+        'by_ip'           => true,
+        'table'           => getenv('AUTHV2_THROTTLE_TABLE') ?: 'auth_login_attempts',
     ],
 ];

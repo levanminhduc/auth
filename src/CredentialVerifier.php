@@ -8,6 +8,8 @@ use mysqli;
 
 final class CredentialVerifier
 {
+    private const DUMMY_HASH = '$2y$10$9n8vagSlqismArdfujAdmud.jmAs./XO0LiZy2BkHCie9t8a02/nq';
+
     private mysqli $conn;
     private string $table;
     private string $userColumn;
@@ -46,6 +48,8 @@ final class CredentialVerifier
         $stmt->close();
 
         if ($row === null || !array_key_exists($this->passColumn, $row)) {
+            // WHY: mọi nhánh return null chưa chạy password_verify thật phải tốn bcrypt, nếu không thì "user không tồn tại" nhanh hơn "sai plaintext" và thành oracle.
+            password_verify($password, self::DUMMY_HASH);
             return null;
         }
 
@@ -57,6 +61,7 @@ final class CredentialVerifier
             }
         } else {
             if (!hash_equals($stored, $password)) {
+                password_verify($password, self::DUMMY_HASH);
                 return null;
             }
             if ($this->upgradeOnLogin) {

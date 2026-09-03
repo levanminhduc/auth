@@ -24,40 +24,40 @@ foreach (TestRegistry::$cases as $case) {
     try {
         ($case['fn'])();
         TestRegistry::$passed++;
-        echo '.';
+        fwrite(STDOUT, '.');
     } catch (SkippedTest $e) {
         TestRegistry::$skipped++;
         TestRegistry::$skips[] = $case['name'] . ' — ' . $e->getMessage();
-        echo 's';
+        fwrite(STDOUT, 's');
     } catch (Throwable $e) {
         TestRegistry::$failed++;
         TestRegistry::$failures[] = $case['name'] . "\n    " . $e->getMessage();
-        echo 'F';
+        fwrite(STDOUT, 'F');
     }
 }
 
-echo "\n\n";
+fwrite(STDOUT, "\n\n");
 
 foreach (TestRegistry::$skips as $skip) {
-    echo "SKIP  {$skip}\n";
+    fwrite(STDOUT, "SKIP  {$skip}\n");
 }
 if (TestRegistry::$skips !== []) {
-    echo "\n";
+    fwrite(STDOUT, "\n");
 }
 
 foreach (TestRegistry::$failures as $failure) {
-    echo "FAIL  {$failure}\n";
+    fwrite(STDOUT, "FAIL  {$failure}\n");
 }
 if (TestRegistry::$failures !== []) {
-    echo "\n";
+    fwrite(STDOUT, "\n");
 }
 
-printf(
+fwrite(STDOUT, sprintf(
     "%d pass, %d fail, %d skip (%d test)\n",
     TestRegistry::$passed,
     TestRegistry::$failed,
     TestRegistry::$skipped,
     count(TestRegistry::$cases)
-);
+));
 
 exit(TestRegistry::$failed > 0 ? 1 : 0);

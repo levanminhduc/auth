@@ -75,15 +75,27 @@ test('isLoggedIn: BASELINE không xét logged_in_at cũ tới đâu (task 3.8 th
     );
 });
 
-test('clear: xoá đúng 3 key, giữ nguyên key của dự án', function (): void {
+test('clear: xoá đúng 4 key, giữ nguyên key của dự án', function (): void {
     with_session(
-        ['user_id' => 3, 'name' => 'a', 'logged_in_at' => 1, 'lkh_bo_loc' => 'x'],
+        ['user_id' => 3, 'name' => 'a', 'logged_in_at' => 1, 'shared_auth_csrf' => 'tok', 'lkh_bo_loc' => 'x'],
         static function (): void {
             SessionContract::clear();
             assert_false(isset($_SESSION['user_id']));
             assert_false(isset($_SESSION['name']));
             assert_false(isset($_SESSION['logged_in_at']));
+            assert_false(isset($_SESSION['shared_auth_csrf']));
             assert_same('x', $_SESSION['lkh_bo_loc'], 'key riêng của dự án không bị đụng');
+        }
+    );
+});
+
+test('clear: xoá shared_auth_csrf', function (): void {
+    with_session(
+        ['shared_auth_csrf' => 'tok', 'lkh_bo_loc' => 'x'],
+        static function (): void {
+            SessionContract::clear();
+            assert_false(isset($_SESSION[SessionContract::CSRF]));
+            assert_same('x', $_SESSION['lkh_bo_loc']);
         }
     );
 });

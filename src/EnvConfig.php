@@ -6,7 +6,7 @@ namespace Hoatho\SharedAuth;
 
 final class EnvConfig
 {
-    public const SESSION_LIFETIME = 7 * 24 * 60 * 60;
+    public const SESSION_LIFETIME = 30 * 24 * 60 * 60;
 
     public const SESSION_NAME_DEFAULT = 'HTSSOSESSID';
 
@@ -87,6 +87,8 @@ final class EnvConfig
             return [
                 '/lichkehoach/public/' => 'Lịch kế hoạch',
                 '/nhansuhtdb/'         => 'Nhân sự HTĐB',
+                '/sangkienct/'         => 'Sáng kiến cải tiến',
+                '/khsanxuat/'          => 'Kế hoạch sản xuất',
             ];
         }
 

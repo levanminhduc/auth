@@ -48,8 +48,67 @@
 
 - [ ] 4.1 Sau 2–4 tuần: phần còn plaintext (user không hoạt động) → force-hash bằng script 1 lần, hoặc reset + thông báo
 - [ ] 4.2 Bảng sạch 100% → gỡ nhánh so plaintext khỏi `CredentialVerifier`; bump version package
-- [ ] 4.3 Gỡ code chết: form login cũ, logout cũ, remember-me cookie ở nhansuhtdb; gỡ shim `id` ở lichkehoach nếu không còn nơi đọc
+- [ ] 4.3 Gỡ code chết: form login cũ, logout cũ, remember-me cookie ở nhansuhtdb (`views/login.php` còn
+  đọc cookie `user_login`). sangkienct đã dọn ở 5.1b.
+  Cột `mysqli`.`user`.`remember_token`/`token_expiry` giờ KHÔNG dự án nào đọc/ghi → cân nhắc DROP (đổi
+  schema dùng chung, cần chốt riêng)
 
-## 5. Đợt sau — Nhân rộng (NGOÀI scope đợt này)
+## 5. Nhân rộng
 
-- [ ] 5.1 Mỗi dự án www còn lại (chamcong, khsanxuat, baonangsuat, ...): chạy `audit-checklist` → tích hợp theo đúng mẫu lichkehoach (nhóm 2), rồi vào chung tiến trình migration
+> Thêm dự án = thêm prefix vào `EnvConfig::projects()` (mặc định) hoặc `SHARED_AUTH_PROJECTS`. Đây là
+> allowlist DUY NHẤT của `?redirect=`; quên bước này thì login xong user rơi về portal chứ không quay lại.
+
+- [x] 5.1 **sangkienct** — tích hợp theo mẫu lichkehoach (nhóm 2: sửa trực tiếp, chỉ 8 `session_start()`).
+  - `includes/auth.php` (mới): require `authV2/bootstrap.php` + dựng lại bối cảnh mỗi request từ
+    `mysqli`.user (name/ma_nv/full_name/role/signature_image) và `quan_ly_nhan_su`.nhan_vien
+    (ho_ten/vi_tri/phong_ban → `vai_tro`, `co_quyen_tao_yeu_cau`) — thay đoạn auth_controller cũ dựng
+    một lần lúc login. Lưu giá trị THÔ (view sangkienct tự escape), prepared statement thay nối chuỗi.
+  - `index.php`: bỏ `session_start()` + auto-login qua cookie; `checkAuth()` → `Guard::requireLogin()`
+    (trang public home/view/add giữ nguyên không cần login); `?logout` → `EnvConfig::logoutUrl()`.
+  - `login.php` / `logout.php` / `controllers/auth_controller.php` / `controllers/auth_controller1.php`
+    → forwarder 302. **Gỡ**: so plaintext `$row['password'] === $password`, remember-me token +
+    cookie `user_login`/`remember_token`, `ALTER TABLE user` ngầm mỗi request, `error_log` in mật khẩu.
+  - `statistics.php`, `database/upload_handler.php` → `session_start()` → bootstrap chung;
+    `api/convert_video.php` giữ 403 JSON (XHR), chỉ đổi check sang `SessionContract::isLoggedIn()`.
+  - `EnvConfig::projects()` + `views/detail.php` (link `../auth/login.php` hỏng → `login.php`).
+  - Test HTTP thật: Guard 302✓ login→302 về đúng `?action=stats`✓ bối cảnh dựng lại khớp DB
+    (ĐẶNG THỊ THU MỸ - Quản Đốc - QUẢN LÝ XƯỞNG TRƯỚC)✓ SSO chéo nhansuhtdb+lichkehoach✓ portal có
+    sangkienct✓ logout lan ra mọi dự án✓ DB vẫn 149/0 plaintext✓. Unit 57/57 pass.
+  - sangkienct KHÔNG có điểm GHI `mysqli`.`user`.`password` (các INSERT user là bảng `user` của DB
+    `sangkienct`, khác bảng auth) → không phải sửa gì ở task 3.2.
+- [x] 5.1b Dọn code chết sangkienct (không tham chiếu ở đâu, đã xác nhận bằng grep trước khi xoá):
+  `views/login.php` + `login_1.php` (form login cũ), `controllers/auth_controller1.php` (bản login cũ
+  thứ hai, chưa từng có form nào trỏ tới), `index_nhansu.php` (require `auth.php` không tồn tại — hỏng
+  từ trước), `db_add_token_columns.php` (script thêm cột remember-me). GIỮ `controllers/auth_controller.php`
+  làm forwarder cho POST/bookmark cũ (đúng mẫu `login_action.php` của lichkehoach). Smoke test lại 10/10 pass.
+  Không đụng: `views/header_new.php` và `logincu.rar` (chết nhưng ngoài phạm vi auth, có thể là bản nháp/sao lưu).
+- [x] 5.2 **khsanxuat** — tích hợp theo mẫu nhansuhtdb (nhóm 2: 25 `session_start()` rải rác 23 file).
+  - `.htaccess`: `php_value auto_prepend_file "C:/laragon/www/authV2/prepend.php"` → mọi `session_start()`
+    cũ tham gia phiên `HTSSOSESSID` mà không phải sửa 23 file.
+  - `bootstrap.php` (điểm neo có sẵn, ~60 file require): `session_start()` → `authV2/bootstrap.php`,
+    rồi gọi `khsxSyncSessionContext($connect)`.
+  - `includes/security/session_context.php` (mới): dựng lại mỗi request từ `mysqli`.`user`
+    (`username`, `full_name`) và `mysqli`.`user_app_role` (`app_role`, luật `app IN ('khsanxuat','*')`,
+    `'*'` thắng — chép nguyên từ login cũ). Giá trị THÔ (header.php + activity_logger tự escape).
+    User bị xoá giữa phiên → xoá sạch bối cảnh + quyền. **Đổi hành vi có chủ ý:** role trước kia nạp
+    1 lần lúc login (thu hồi quyền chỉ hiệu lực sau khi login lại), nay đọc mỗi request → hiệu lực ngay.
+  - `includes/security/auth-helper.php`: `isLoggedIn()` → `SessionContract::isLoggedIn()`,
+    `requireLogin()` → `Guard::requireLogin()` (bỏ `$_SESSION['redirect_url']`). `userCan`/`requireFeature`/
+    `$app_role_features` GIỮ NGUYÊN (authz — ngoài ranh giới package).
+  - `account/login.php` + `login_action.php` + `logout.php` → forwarder 302. **Gỡ**: so plaintext
+    `$pass == $db_password`, form login, `$_SESSION['id']` (không nơi nào đọc), cơ chế `redirect_url`.
+    logout.php giữ nguyên check CSRF của link GET rồi mới chuyển sang logout chung.
+  - `pages/theodoi.php` + `api/view_activity_logs.php`: check `$_SESSION['user_id']` thô → `requireLogin()`.
+  - `account/change_password_action.php`: điểm ĐỌC password → hiểu cả plaintext lẫn bcrypt (bất biến a).
+    Điểm GHI vẫn plaintext → **khsanxuat CÓ 2 điểm ghi `mysqli`.`user`.`password`**:
+    `change_password_action.php:49` (UPDATE) và `register_action.php:46` (INSERT) → đầu vào task 3.2.
+  - `EnvConfig::projects()` + `tests/unit/env_config_test.php` += `/khsanxuat/`.
+  - Test HTTP thật 15/15 pass: Guard 302✓ redirect-back đúng path✓ `index.php` public còn mở✓ navbar
+    khớp DB (Lê Văn Minh Đức)✓ SSO chéo lichkehoach+nhansuhtdb+sangkienct✓ portal có khsanxuat✓
+    logout lan ra mọi dự án✓ DB vẫn 149/0 plaintext✓. Authz còn nguyên: user không có role → 403 ở
+    `pages/settings.php`, admin → 200. Unit authV2 58/58, `dev-tools/tests/test_auth_helper.php` ALL PASS.
+  - Code chết đã gỡ: `dev-tools/test_login_redirect.php` (test quy tắc redirect của login.php cũ; luật
+    này nay ở `RedirectSanitizer` và đã có unit test riêng). Còn tồn: `dev-tools/backups/*` (bản sao lưu
+    cũ, có `session_start()` + đọc `$_SESSION['username']`) — thư mục `dev-tools/` bị `.htaccess` chặn
+    và nằm trong `.gitignore`, ngoài phạm vi auth.
+- [ ] 5.3 Mỗi dự án www còn lại (chamcong, baonangsuat, ...): chạy `audit-checklist` → tích hợp theo đúng mẫu lichkehoach (nhóm 2), rồi vào chung tiến trình migration

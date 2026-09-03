@@ -1,0 +1,77 @@
+@import "tailwindcss" source(none);
+@source "../../views";
+@source "../../public/assets/js";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, Arial, sans-serif;
+  --color-brand-50: #eef2ff;
+  --color-brand-100: #e0e7ff;
+  --color-brand-500: #5b73e8;
+  --color-brand-600: #4a62d7;
+  --color-brand-700: #3d51b5;
+  --color-brand-800: #33449a;
+  --color-accent: #44c4fa;
+  --color-ink-900: #1f2933;
+  --color-ink-700: #3d4465;
+  --color-ink-500: #5f6b7a;
+  --color-line: #e4e7eb;
+  --color-danger-bg: #fef2f2;
+  --color-danger-line: #fecaca;
+  --color-danger-ink: #991b1b;
+  --color-warn-bg: #fffbeb;
+  --color-warn-line: #fde68a;
+  --color-warn-ink: #92400e;
+  --radius-card: 12px;
+  --radius-field: 8px;
+  --shadow-card: 0 10px 30px rgb(0 0 0 / 0.10);
+}
+
+@layer base {
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: .01ms !important;
+      transition-duration: .01ms !important;
+    }
+  }
+}
+
+@layer components {
+  .login-shell {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    min-height: 100dvh;
+    padding: 0;
+  }
+  @media (min-width: 640px) {
+    .login-shell {
+      padding: 16px;
+    }
+  }
+
+  .field-input {
+    @apply w-full px-3 py-2 text-[16px] font-normal text-ink-900 bg-white rounded-field border border-line focus-visible:outline-none focus-visible:border-brand-500 focus-visible:ring-[3px] focus-visible:ring-brand-500/25 disabled:bg-slate-100 disabled:cursor-not-allowed;
+  }
+  .field-input[aria-invalid="true"] {
+    @apply border-danger-line;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center px-4 py-2.5 text-[16px] font-semibold text-white bg-brand-600 rounded-field hover:bg-brand-700 active:bg-brand-800 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-brand-700/40 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-150;
+  }
+
+  .alert {
+    @apply flex items-start gap-2 text-[14px] font-normal rounded-field border px-3 py-2;
+  }
+  .alert-danger {
+    @apply bg-danger-bg border-danger-line text-danger-ink;
+  }
+  .alert-warn {
+    @apply bg-warn-bg border-warn-line text-warn-ink;
+  }
+  .alert-info {
+    @apply bg-brand-50 border-brand-100 text-ink-700;
+  }
+}

@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Hoatho\SharedAuth\EnvConfig;
+
 /**
  * Smoke HTTP cho app login, chạy trên `php -S` (golden baseline).
  *
@@ -142,6 +144,7 @@ function http_env(): ?array
             'SHARED_AUTH_BASE_URL'         => '/public',
             'SHARED_AUTH_PROJECTS'         => '/duan-test/|Dự án test',
             'SHARED_AUTH_UPGRADE_ON_LOGIN' => '0',
+            'AUTHV2_THROTTLE_TABLE'        => '_authv2_test_attempts',
             'PATH'                         => getenv('PATH') ?: '',
             'SystemRoot'                   => getenv('SystemRoot') ?: '',
         ],
@@ -175,10 +178,22 @@ function http_env(): ?array
     $stmt->execute();
     $stmt->close();
 
+    $conn->query('DROP TABLE IF EXISTS `_authv2_test_attempts`');
+    $ddl = str_replace(
+        'auth_login_attempts',
+        '_authv2_test_attempts',
+        (string) file_get_contents($root . '/database/auth_login_attempts.sql')
+    );
+    if ($conn->query($ddl) === false) {
+        proc_terminate($process);
+        return null;
+    }
+
     register_shutdown_function(static function () use ($process, $conn): void {
         proc_terminate($process);
         proc_close($process);
         $conn->query("DELETE FROM `user` WHERE name = '" . HTTP_USER . "'");
+        $conn->query('DROP TABLE IF EXISTS `_authv2_test_attempts`');
     });
 
     $env = ['conn' => $conn];
@@ -338,6 +353,14 @@ test('HTTP: login đúng KHÔNG ghi lại mật khẩu khi công tắc nâng c�
     );
 });
 
+function http_clear_attempts(): void
+{
+    $conn = test_db();
+    if ($conn !== null) {
+        $conn->query('DELETE FROM `_authv2_test_attempts`');
+    }
+}
+
 function http_login(): string
 {
     $first = http_request('/public/index.php');
@@ -350,3 +373,175 @@ function http_login(): string
     }
     return (string) $response->sessionCookie();
 }
+
+test('HTTP: security header đầy đủ, không còn meta CSP/inline style/CDN', function (): void {
+    http_require_env();
+
+    $response = http_request('/public/index.php');
+    $csp = (string) $response->header('content-security-policy');
+    assert_contains("frame-ancestors 'none'", $csp);
+    assert_contains("form-action 'self'", $csp);
+    assert_contains("style-src 'self'", $csp);
+    assert_false(str_contains($csp, 'unsafe-inline'), 'CSP không chứa unsafe-inline');
+    assert_same('DENY', $response->header('x-frame-options'));
+    assert_same('nosniff', $response->header('x-content-type-options'));
+    assert_same('same-origin', $response->header('referrer-policy'));
+    assert_contains('no-store', (string) $response->header('cache-control'));
+
+    assert_false(str_contains($response->body, 'http-equiv'), 'không meta CSP');
+    assert_false(str_contains($response->body, '<style'), 'không thẻ style');
+    assert_false(str_contains($response->body, ' style="'), 'không inline style');
+    assert_false(str_contains($response->body, 'cdn.' . 'jsdelivr'), 'không CDN jsDelivr');
+    assert_false(str_contains($response->body, 'cdn' . 'js.cloudflare'), 'không CDN Cloudflare');
+    assert_false(str_contains($response->body, 'boot' . 'strap'), 'không framework CSS cũ');
+    assert_false(str_contains($response->body, 'font-' . 'awesome'), 'không webfont icon cũ');
+});
+
+test('HTTP: sai mật khẩu giữ username và focus vào ô mật khẩu', function (): void {
+    http_require_env();
+
+    $first = http_request('/public/index.php');
+    $response = http_request('/public/index.php', [
+        'cookie' => (string) $first->sessionCookie(),
+        'post'   => ['username' => HTTP_USER, 'password' => 'sai-mat-khau', '_csrf' => http_csrf($first->body)],
+    ]);
+    assert_same(200, $response->status);
+    assert_true(
+        preg_match('/id="username"[^>]*value="' . preg_quote(HTTP_USER, '/') . '"/', $response->body) === 1,
+        'giữ username'
+    );
+    assert_true(preg_match('/id="password"[^>]*autofocus/', $response->body) === 1, 'focus password');
+    assert_true(preg_match('/id="username"[^>]*autofocus/', $response->body) === 0, 'username không autofocus');
+    assert_false(str_contains($response->body, 'sai-mat-khau'), 'không in lại mật khẩu');
+});
+
+test('HTTP: ?reason=expired hiện banner, reason lạ bị bỏ qua', function (): void {
+    http_require_env();
+
+    $expired = http_request('/public/index.php?reason=expired');
+    assert_contains('Phiên làm việc đã hết hạn', $expired->body);
+
+    $junk = http_request('/public/index.php?reason=khong-hop-le');
+    assert_false(str_contains($junk->body, 'Phiên làm việc đã hết hạn'), 'reason lạ bị bỏ');
+    assert_false(str_contains($junk->body, 'alert-warn'), 'không banner vàng');
+});
+
+test('HTTP: sai 5 lần → 429, đúng mật khẩu vẫn bị chặn', function (): void {
+    http_require_env();
+    http_clear_attempts();
+    try {
+        $first = http_request('/public/index.php');
+        $cookie = (string) $first->sessionCookie();
+        for ($i = 0; $i < 5; $i++) {
+            $page = http_request('/public/index.php', ['cookie' => $cookie]);
+            $response = http_request('/public/index.php', [
+                'cookie' => $cookie,
+                'post'   => [
+                    'username' => HTTP_USER,
+                    'password' => 'sai-' . $i,
+                    '_csrf'    => http_csrf($page->body),
+                ],
+            ]);
+            assert_same(200, $response->status, 'lần sai ' . ($i + 1));
+            $next = $response->sessionCookie();
+            if ($next !== null && $next !== '') {
+                $cookie = $next;
+            }
+        }
+
+        $page = http_request('/public/index.php', ['cookie' => $cookie]);
+        $locked = http_request('/public/index.php', [
+            'cookie' => $cookie,
+            'post'   => [
+                'username' => HTTP_USER,
+                'password' => HTTP_PASS,
+                '_csrf'    => http_csrf($page->body),
+            ],
+        ]);
+        assert_same(429, $locked->status, 'đúng mật khẩu vẫn 429');
+        assert_contains('thử lại sau', $locked->body);
+        assert_true(
+            preg_match('/thử lại sau (\d+) phút/', $locked->body, $m) === 1,
+            'có số phút'
+        );
+        $mins = (int) $m[1];
+        assert_true($mins >= 1 && $mins <= 15, 'phút trong [1,15], nhận ' . $mins);
+
+        $after = $locked->sessionCookie();
+        assert_true($after === null || $after === $cookie, 'không đổi session id');
+
+        $portal = http_request('/public/portal.php', ['cookie' => $cookie]);
+        assert_same(302, $portal->status, 'vẫn chưa đăng nhập');
+    } finally {
+        http_clear_attempts();
+    }
+});
+
+test('HTTP: login đúng xoá bộ đếm của username', function (): void {
+    http_require_env();
+    http_clear_attempts();
+    try {
+        $first = http_request('/public/index.php');
+        $cookie = (string) $first->sessionCookie();
+        for ($i = 0; $i < 2; $i++) {
+            $page = http_request('/public/index.php', ['cookie' => $cookie]);
+            $response = http_request('/public/index.php', [
+                'cookie' => $cookie,
+                'post'   => [
+                    'username' => HTTP_USER,
+                    'password' => 'sai-' . $i,
+                    '_csrf'    => http_csrf($page->body),
+                ],
+            ]);
+            assert_same(200, $response->status);
+            $next = $response->sessionCookie();
+            if ($next !== null && $next !== '') {
+                $cookie = $next;
+            }
+        }
+
+        $page = http_request('/public/index.php', ['cookie' => $cookie]);
+        $ok = http_request('/public/index.php', [
+            'cookie' => $cookie,
+            'post'   => [
+                'username' => HTTP_USER,
+                'password' => HTTP_PASS,
+                '_csrf'    => http_csrf($page->body),
+            ],
+        ]);
+        assert_same(302, $ok->status, 'login đúng');
+
+        $conn = test_db();
+        $u = $conn->query("SELECT COUNT(*) AS n FROM `_authv2_test_attempts` WHERE identifier='u:" . HTTP_USER . "'");
+        assert_same(0, (int) $u->fetch_assoc()['n'], 'khoá username bị xoá');
+        $ip = $conn->query("SELECT COUNT(*) AS n FROM `_authv2_test_attempts` WHERE identifier='ip:127.0.0.1'");
+        assert_same(2, (int) $ip->fetch_assoc()['n'], 'khoá IP còn');
+    } finally {
+        http_clear_attempts();
+    }
+});
+
+test('HTTP: CSRF session key là shared_auth_csrf', function (): void {
+    http_require_env();
+
+    $first = http_request('/public/index.php');
+    $id = $first->sessionCookie();
+    assert_true($id !== null && $id !== '', 'có session id');
+
+    $path = EnvConfig::sessionSavePath() . '/sess_' . $id;
+    $data = false;
+    for ($i = 0; $i < 10; $i++) {
+        if (is_file($path)) {
+            $data = file_get_contents($path);
+            if ($data !== false && $data !== '') {
+                break;
+            }
+        }
+        usleep(50000);
+    }
+    if ($data === false || $data === '') {
+        fail_test('không đọc được file session tại ' . $path);
+    }
+    assert_true(str_contains($data, 'shared_auth_csrf|'), 'có key shared_auth_csrf');
+    assert_same(0, preg_match('/(?<![A-Za-z0-9_])_csrf\|/', $data), 'không còn key _csrf');
+});

@@ -19,11 +19,25 @@ final class Guard
             return;
         }
 
-        $location = EnvConfig::loginUrl() . '?redirect=' . rawurlencode($this->currentUri());
+        $location = $this->loginLocation();
         if (!headers_sent()) {
             header('Location: ' . $location, true, 302);
         }
         exit;
+    }
+
+    public function loginLocation(): string
+    {
+        $location = EnvConfig::loginUrl() . '?redirect=' . rawurlencode($this->currentUri());
+        // WHY: cookie phiên còn + session đã start nhưng rỗng = PHP vừa cấp phiên mới sau khi file cũ bị GC (hết hạn), không phải khách lần đầu (không cookie) hay khách chỉ có CSRF (session không rỗng).
+        if (
+            isset($_COOKIE[EnvConfig::sessionName()])
+            && session_status() === PHP_SESSION_ACTIVE
+            && $_SESSION === []
+        ) {
+            $location .= '&reason=expired';
+        }
+        return $location;
     }
 
     public function isPublic(string $path): bool

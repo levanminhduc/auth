@@ -12,21 +12,31 @@ Ranh giới: package chỉ lo **authentication** (ai đang đăng nhập). **Aut
 ```
 authV2/
 ├── composer.json          # PSR-4 Hoatho\SharedAuth\ → src/
-├── bootstrap.php          # nạp autoload + SessionBootstrap::start()  (dùng cho app auth)
+├── autoload.php           # chỉ nạp autoload, không mở phiên
+├── bootstrap.php          # autoload + SessionBootstrap::start()
+├── prepend.php            # autoload + SessionBootstrap::configure() — dùng cho auto_prepend_file
 ├── config/db.php          # kết nối mysqli.user cho APP auth (không thuộc package)
 ├── src/                   # === PACKAGE (mọi dự án require) ===
 │   ├── EnvConfig.php          # local vs production, tên/URL/thời hạn phiên
 │   ├── SessionBootstrap.php   # điểm DUY NHẤT mở phiên (idempotent)
-│   ├── SessionContract.php    # key session chuẩn: user_id, name, logged_in_at
+│   ├── SessionContract.php    # key session chuẩn: user_id, name, logged_in_at, shared_auth_csrf
 │   ├── CredentialVerifier.php # verify plaintext+bcrypt, lazy hash-on-login
 │   ├── RedirectSanitizer.php  # ?redirect= chỉ path nội bộ, chặn open redirect
 │   ├── Guard.php              # chưa login → redirect /auth/?redirect=; whitelist public
+│   ├── LoginThrottle.php      # chống brute-force (fail-open)
 │   └── IdentitySync.php       # (tùy chọn) re-đọc name/role từ user mỗi request
 ├── public/                # === APP login ===
 │   ├── index.php              # GET form + POST verify (SSO: đã login thì bỏ qua form)
 │   ├── logout.php             # huỷ phiên toàn hệ thống
-│   └── portal.php             # trang đích liệt kê dự án
-└── views/login.php        # form (tách khỏi logic)
+│   ├── portal.php             # trang đích liệt kê dự án
+│   └── assets/css/app.css     # CSS đã build (commit vào repo)
+├── views/
+│   ├── login.php              # form (chỉ đọc $viewData)
+│   └── partials/icon.php      # SVG icon inline
+├── resources/css/app.css  # nguồn Tailwind v4
+├── database/auth_login_attempts.sql
+├── build-css.ps1          # tải/pin Tailwind standalone, build CSS
+└── tools/                 # gitignore — tailwindcss.exe
 ```
 
 ## Hợp đồng tích hợp — mỗi dự án chỉ còn 2 điểm chạm
@@ -38,6 +48,10 @@ Sau khi require package (Composer path repo, hoặc autoload trực tiếp `src/
 ```php
 \Hoatho\SharedAuth\SessionBootstrap::start();
 ```
+
+Dự án còn quá nhiều `session_start()` rải rác để sửa tay: trỏ `auto_prepend_file` tới
+`authV2/prepend.php` (gọi `SessionBootstrap::configure()` — cấu hình phiên nhưng KHÔNG mở, để các
+`session_start()` cũ tự mở và tham gia phiên chung). Đã dùng ở `nhansuhtdb`, `khsanxuat`.
 
 **2. Chặn truy cập** — thay MỌI check `$_SESSION` rải rác, đặt ở entry point:
 
@@ -54,14 +68,16 @@ Dự án **giữ lại**: logic phân quyền (role → menu/permission), app-st
 
 | Key             | Ý nghĩa                      | Nguồn                     |
 |-----------------|------------------------------|---------------------------|
-| `user_id`       | Khoá danh tính (= `user.id`) | `SessionContract::set()`  |
-| `name`          | Tên đăng nhập                | `SessionContract::set()`  |
-| `logged_in_at`  | Thời điểm login (unix)       | `SessionContract::set()`  |
+| `user_id`           | Khoá danh tính (= `user.id`) | `SessionContract::set()`  |
+| `name`              | Tên đăng nhập                | `SessionContract::set()`  |
+| `logged_in_at`      | Thời điểm login (unix)       | `SessionContract::set()`  |
+| `shared_auth_csrf`  | Token CSRF form login        | `public/index.php`        |
 
 Đọc danh tính qua `SessionContract::userId()` / `::name()` / `::isLoggedIn()`, không đụng thẳng `$_SESSION`.
 
-> **Shim cho lichkehoach:** code cũ đọc `$_SESSION['id']`. Sau khi tích hợp, thêm một dòng
+> **Shim khoá danh tính cũ:** dự án nào còn chỗ ĐỌC khoá cũ (vd `$_SESSION['id']`) thì thêm một dòng
 > `$_SESSION['id'] = SessionContract::userId();` sau bootstrap để chỗ đọc cũ vẫn chạy, gỡ dần sau.
+> Đã kiểm tra: lichkehoach và khsanxuat không nơi nào đọc `$_SESSION['id']` → không đặt shim.
 
 ## Môi trường
 
@@ -73,6 +89,12 @@ Dự án **giữ lại**: logic phân quyền (role → menu/permission), app-st
 | `SHARED_AUTH_BASE_URL`        | `/authV2/public`   | `/auth`           |
 | `SHARED_AUTH_SESSION_NAME`    | `HTSSOSESSID`      | `HTSSOSESSID`     |
 | `SHARED_AUTH_UPGRADE_ON_LOGIN`| *(tắt)*            | `1` **chỉ ở GĐ2** |
+| `SHARED_AUTH_PROJECTS`        | *(4 dự án đã tích hợp)* | khai báo `prefix\|nhãn`, cách nhau `,` |
+
+> **Allowlist redirect** `SHARED_AUTH_PROJECTS`: vừa là danh sách hiện ở portal, vừa là allowlist DUY NHẤT
+> cho `?redirect=`. Tích hợp thêm dự án mới thì phải thêm prefix của nó vào đây, nếu không mọi redirect
+> quay về dự án đó đều bị loại và user rơi về portal. Mặc định:
+> `/lichkehoach/public/`, `/nhansuhtdb/`, `/sangkienct/`, `/khsanxuat/`.
 
 > **Công tắc migration** `SHARED_AUTH_UPGRADE_ON_LOGIN`: **để TẮT trong suốt quá trình tích hợp** nhiều
 > dự án. Khi tắt, authV2 verify được cả plaintext lẫn bcrypt nhưng **không ghi hash** → không mật khẩu nào
@@ -91,6 +113,56 @@ composer dump-autoload      # sinh vendor/autoload.php (không bắt buộc — 
 
 Mở `http://localhost/authV2/public/` → đăng nhập bằng tài khoản trong `mysqli.user`.
 Đã đăng nhập rồi mở lại sẽ được đưa thẳng tới portal (hiệu ứng SSO).
+
+`Guard::requireLogin()` thêm `?reason=expired` khi đủ cả ba: request còn cookie phiên, session đã
+`PHP_SESSION_ACTIVE`, và `$_SESSION` rỗng (file phiên bị GC). Dự án nào ghi key riêng vào session
+**trước** `requireLogin()` sẽ không bao giờ ra `expired` — chấp nhận. `denied` không do Guard phát;
+dự án tự redirect thủ công nếu cần. Giá trị `reason` lạ trên form login bị bỏ qua.
+
+## Build CSS
+
+CSS trang login build từ `resources/css/app.css` bằng `build-css.ps1` (Tailwind CSS **v4.1.18**
+standalone). Output `public/assets/css/app.css` **commit vào repo** — server production không chạy
+build. Sửa `views/` hoặc `public/assets/js/login.js` xong phải chạy lại:
+
+```
+powershell -ExecutionPolicy Bypass -File .\build-css.ps1
+powershell -ExecutionPolicy Bypass -File .\build-css.ps1 -Watch
+```
+
+Script pin version trong `$Version`; nếu chưa có `tools/tailwindcss.exe` thì tải từ GitHub releases
+(thư mục `tools/` bị gitignore). Tải thất bại thì fallback `npx @tailwindcss/cli@4.1.18`.
+
+Tailwind v4 dùng `@property`, `color-mix()`, cascade layers → cần **Chrome/Edge ≥ 111**. Máy nào
+cũ hơn thì báo IT. Không polyfill ở đợt này.
+
+## Chống brute-force
+
+Chạy **một lần** file `database/auth_login_attempts.sql` trên DB `mysqli` (local và production).
+
+Chính sách: 5 lần sai / cửa sổ 15 phút → khoá 15 phút, theo cả `u:<username>` và `ip:<REMOTE_ADDR>`
+(`by_ip` mặc định bật). Login đúng thì xoá bộ đếm của username, **không** xoá khoá IP. Bảng không
+tồn tại hoặc query lỗi → **fail-open** (vẫn cho đăng nhập) + `error_log`. Tắt bằng
+`throttle.enabled` trong `config/login_config.php`.
+
+**Cảnh báo:** production đứng sau proxy/NAT thì mọi user chung một `REMOTE_ADDR` → 5 lần sai của
+bất kỳ ai khoá toàn bộ login 15 phút cho cả 4 dự án. Khi đó tắt `by_ip` hoặc cấu hình proxy truyền
+IP thật — package **không** đọc `X-Forwarded-For` vì header đó giả được.
+
+## Security header
+
+`public/index.php` gửi header (không còn config `csp`, không còn `<meta http-equiv>`):
+
+```
+Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'
+X-Frame-Options: DENY
+X-Content-Type-Options: nosniff
+Referrer-Policy: same-origin
+Cache-Control: no-store, no-cache, must-revalidate
+```
+
+`form-action 'self'` chặn cả 302 sau submit sang host khác → nếu sau này dùng
+`SHARED_AUTH_ALLOWED_HOSTS` phải nới directive này.
 
 ## Chạy test
 

@@ -59,3 +59,111 @@ test('isPublic: BASELINE percent-encoding hiện KHÔNG được giải mã (tas
         'hiện tại trả true; sau task 3.2 phải là false'
     );
 });
+
+function with_login_location_context(array $cookie, array $session, string $uri, callable $fn, bool $startSession = false): void
+{
+    with_default_env(static function () use ($cookie, $session, $uri, $fn, $startSession): void {
+        $prevUri = $_SERVER['REQUEST_URI'] ?? null;
+        $prevCookie = $_COOKIE;
+        $prevSession = $_SESSION ?? null;
+        $started = false;
+        $prevSavePath = session_save_path();
+        $prevUseCookies = ini_get('session.use_cookies');
+        $prevLimiter = ini_get('session.cache_limiter');
+        $_SERVER['REQUEST_URI'] = $uri;
+        $_COOKIE = $cookie;
+        $_SESSION = $session;
+        try {
+            if ($startSession) {
+                session_save_path(sys_get_temp_dir());
+                ini_set('session.use_cookies', '0');
+                ini_set('session.cache_limiter', '');
+                if (session_status() !== PHP_SESSION_ACTIVE) {
+                    @session_start();
+                    $started = true;
+                }
+                $_SESSION = $session;
+            }
+            $fn();
+        } finally {
+            if ($started) {
+                $_SESSION = [];
+                session_write_close();
+            }
+            session_save_path($prevSavePath);
+            if ($prevUseCookies !== false) {
+                ini_set('session.use_cookies', (string) $prevUseCookies);
+            }
+            if ($prevLimiter !== false) {
+                ini_set('session.cache_limiter', (string) $prevLimiter);
+            }
+            if ($prevUri === null) {
+                unset($_SERVER['REQUEST_URI']);
+            } else {
+                $_SERVER['REQUEST_URI'] = $prevUri;
+            }
+            $_COOKIE = $prevCookie;
+            if ($prevSession === null) {
+                $_SESSION = [];
+            } else {
+                $_SESSION = $prevSession;
+            }
+        }
+    });
+}
+
+test('loginLocation: không cookie thì chỉ redirect', function (): void {
+    $uri = '/lichkehoach/public/index.php';
+    with_login_location_context([], [], $uri, static function () use ($uri): void {
+        $loc = (new Guard())->loginLocation();
+        assert_same('/authV2/public/index.php?redirect=' . rawurlencode($uri), $loc);
+        assert_false(str_contains($loc, 'reason='), 'không có reason');
+    });
+});
+
+test('loginLocation: cookie + session active + phiên rỗng → reason=expired', function (): void {
+    $uri = '/lichkehoach/public/index.php';
+    with_login_location_context(
+        ['HTSSOSESSID' => 'abc'],
+        [],
+        $uri,
+        static function () use ($uri): void {
+            $loc = (new Guard())->loginLocation();
+            assert_same(
+                '/authV2/public/index.php?redirect=' . rawurlencode($uri) . '&reason=expired',
+                $loc
+            );
+        },
+        true
+    );
+});
+
+test('loginLocation: cookie + session có CSRF → không có reason', function (): void {
+    $uri = '/lichkehoach/public/index.php';
+    with_login_location_context(
+        ['HTSSOSESSID' => 'abc'],
+        ['shared_auth_csrf' => 'x'],
+        $uri,
+        static function () use ($uri): void {
+            $loc = (new Guard())->loginLocation();
+            assert_same('/authV2/public/index.php?redirect=' . rawurlencode($uri), $loc);
+            assert_false(str_contains($loc, 'reason='));
+        },
+        true
+    );
+});
+
+test('loginLocation: cookie + session chưa active → không có reason', function (): void {
+    $uri = '/lichkehoach/public/index.php';
+    with_login_location_context(
+        ['HTSSOSESSID' => 'abc'],
+        [],
+        $uri,
+        static function () use ($uri): void {
+            $loc = (new Guard())->loginLocation();
+            assert_same('/authV2/public/index.php?redirect=' . rawurlencode($uri), $loc);
+            assert_false(str_contains($loc, 'reason='));
+        },
+        false
+    );
+});

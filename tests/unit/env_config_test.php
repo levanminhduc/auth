@@ -99,9 +99,14 @@ test('baseUrl và các URL dẫn xuất', function (): void {
 test('projects: mặc định và khi khai báo qua env', function (): void {
     with_env(['SHARED_AUTH_PROJECTS' => null], static function (): void {
         assert_same(
-            ['/lichkehoach/public/' => 'Lịch kế hoạch', '/nhansuhtdb/' => 'Nhân sự HTĐB'],
+            [
+                '/lichkehoach/public/' => 'Lịch kế hoạch',
+                '/nhansuhtdb/'         => 'Nhân sự HTĐB',
+                '/sangkienct/'         => 'Sáng kiến cải tiến',
+                '/khsanxuat/'          => 'Kế hoạch sản xuất',
+            ],
             EnvConfig::projects(),
-            'mặc định gồm đúng 2 dự án đã tích hợp'
+            'mặc định gồm đúng các dự án đã tích hợp'
         );
     });
 

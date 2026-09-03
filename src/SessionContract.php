@@ -9,6 +9,7 @@ final class SessionContract
     public const USER_ID      = 'user_id';
     public const NAME         = 'name';
     public const LOGGED_IN_AT = 'logged_in_at';
+    public const CSRF         = 'shared_auth_csrf';
 
     public static function set(array $user): void
     {
@@ -35,6 +36,6 @@ final class SessionContract
 
     public static function clear(): void
     {
-        unset($_SESSION[self::USER_ID], $_SESSION[self::NAME], $_SESSION[self::LOGGED_IN_AT]);
+        unset($_SESSION[self::USER_ID], $_SESSION[self::NAME], $_SESSION[self::LOGGED_IN_AT], $_SESSION[self::CSRF]);
     }
 }
