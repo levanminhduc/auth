@@ -11,7 +11,7 @@ self-host**, và khắc phục 26 vấn đề đã ghi nhận trong đợt revie
 
 `authV2` là **điểm đăng nhập chung** cho các dự án PHP cùng host trên Laragon
 (`lichkehoach`, `nhansuhtdb`, `sangkienct`, `khsanxuat`, …). Người dùng đăng nhập **một lần**
-tại đây, mọi dự án dùng chung phiên (cookie `HTSSOSESSID`, path `/`, 7 ngày).
+tại đây, mọi dự án dùng chung phiên (cookie `HTSSOSESSID`, path `/`, trượt 30 ngày kể từ thao tác cuối, kèm trần tuyệt đối 30 ngày kể từ lúc đăng nhập).
 
 Trang login vì vậy là **single point of failure** của toàn bộ hệ thống nội bộ: nó hỏng thì
 không ai vào được dự án nào. Đây là lý do các ràng buộc về self-host và độ bền dưới đây
@@ -85,26 +85,46 @@ chung nhiều người.
 
 Lớp mới, nhận `mysqli` từ ngoài giống `CredentialVerifier` (package **không** tự quản DB).
 
-Bảng:
+Bảng (bản gốc `VARCHAR(190)`; bản hiện hành dưới đây, kèm migration
+`database/migrations/2026-10-17_auth_login_attempts_hardening.sql`):
 
 ```sql
 CREATE TABLE auth_login_attempts (
   id           BIGINT AUTO_INCREMENT PRIMARY KEY,
-  identifier   VARCHAR(190) NOT NULL,   -- 'u:<username>' hoặc 'ip:<ip>'
+  identifier   VARCHAR(330) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+                           -- 'p:<username>|<ip>', 'ip:<ip>' hoặc 'u:<username>'
   attempted_at DATETIME NOT NULL,
-  KEY idx_identifier_time (identifier, attempted_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  KEY idx_identifier_time (identifier, attempted_at),
+  KEY idx_attempted_at (attempted_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-Chính sách:
+Cột 330 ký tự x 4 byte chỉ vừa khoá chỉ mục khi InnoDB `ROW_FORMAT=DYNAMIC`. Collation giống `user.name`
+nên `Admin` và `admin` dùng chung bộ đếm.
 
-- Đếm theo **cả hai** khoá: `u:<username>` và `ip:<remote_addr>`, cửa sổ trượt **15 phút**.
-- Ngưỡng: **5 lần sai** → khoá **15 phút** cho khoá tương ứng.
-- Đăng nhập **thành công** → xoá mọi bản ghi của `u:<username>` đó.
-- Khi bị khoá: trả HTTP **429**, hiện thông báo *"Bạn đã nhập sai quá nhiều lần. Vui lòng thử
-  lại sau N phút."* — **không** tiết lộ username có tồn tại hay không.
-- Ghi `error_log` mỗi lần chạm ngưỡng, kèm IP và username, để IT truy vết.
-- Dọn bản ghi cũ hơn 24h theo cơ hội (khoảng 5% số request POST) ngay trong `LoginThrottle`.
+Chính sách **lai** (thay cho thiết kế ban đầu "đếm riêng `u:` và `ip:`, 5 lần"):
+
+| Khoá | Ngưỡng sai / cửa sổ | Khoá |
+|---|---|---|
+| `p:<username>\|<ip>` (cặp) | 5 / 15 phút | 15 phút |
+| `ip:<remote_addr>` | 30 / 15 phút | 15 phút |
+| `u:<username>` (trần) | 50 / 60 phút | 30 phút |
+
+- Vì sao lai: chỉ đếm theo cặp thì không có giới hạn theo từng tài khoản (dò phân tán từ nhiều IP qua
+  mặt được); chỉ đếm toàn cục theo `u:` ở ngưỡng thấp thì ai cũng khoá được tài khoản của người khác.
+  Cặp lo dò thường, `u:` là trần cao chống dò phân tán. Đánh đổi đã biết: gửi 50 lần sai vẫn khoá được một
+  tài khoản 30 phút.
+- Khoá kéo dài đúng `lockout` phút kể từ lần sai chạm ngưỡng, không phụ thuộc cửa sổ. Lần thử bị từ chối
+  vì đang khoá không được lưu.
+- `begin()` ghi lần thử trước rồi mới đếm (chống đua khi nhiều request song song); `succeed()` xoá bộ đếm
+  `p:` và `u:` của username đó, và chỉ bỏ bản ghi `ip:` của chính lần thử thành công.
+- Khi bị khoá (kể cả chạm trần `u:`, kể cả mật khẩu đúng): HTTP **429**, thông báo *"Bạn đã nhập sai quá
+  nhiều lần. Vui lòng thử lại sau N phút."* — **không** tiết lộ username có tồn tại hay không.
+- Chạm trần `u:` ghi `error_log` kèm IP và username (đã thoát ký tự điều khiển) để IT truy vết.
+- Username sai UTF-8 hoặc dài quá 255 ký tự, mật khẩu quá 1024 byte: từ chối ngay với thông báo chung
+  *"Sai tên đăng nhập hoặc mật khẩu."* trước khi chạm throttle hay DB.
+- Dọn bản ghi theo cơ hội (khoảng 5% số request POST) ngay trong `LoginThrottle`, giữ tối thiểu
+  `max(24h, window + lockout)`.
 - Nếu bảng chưa tồn tại / query lỗi → **fail-open** (cho đăng nhập) + `error_log` cảnh báo.
   Không được để lỗi hạ tầng khoá toàn bộ hệ thống.
 
@@ -146,9 +166,16 @@ trang login, gây lỗi "Phiên nhập liệu đã hết hạn" ngẫu nhiên, k
 
 ### 5.5 Chống timing attack
 
-Trong `CredentialVerifier::verify()`, khi không tìm thấy user hoặc thiếu cột password: chạy
-một `password_verify($password, <bcrypt hash giả cố định>)` rồi mới `return null`, để thời
-gian phản hồi của "user không tồn tại" và "sai mật khẩu" xấp xỉ nhau.
+Trong `CredentialVerifier::verify()`, khi không tìm thấy user, thiếu cột password, username khớp nhiều
+hơn một dòng, hoặc password plaintext sai: chạy một `password_hash($password, PASSWORD_DEFAULT)` (cùng
+cost với một lần verify, không phụ thuộc cost của hash đang lưu) rồi mới `return null`, để thời gian
+phản hồi của "user không tồn tại" và "sai mật khẩu" xấp xỉ nhau. Tham số password mang
+`#[\SensitiveParameter]` để không lọt vào stack trace.
+
+Username khớp hơn một dòng (collation không phân biệt hoa/thường) bị **từ chối** và ghi `error_log`.
+Lỗi DB khi xác thực ném `AuthBackendException`; `public/index.php` trả HTTP **503** *"Hệ thống đang bận,
+vui lòng thử lại."* thay vì coi là sai mật khẩu. Mặc định `upgradeOnLogin=false` (chỉ bật qua
+`SHARED_AUTH_UPGRADE_ON_LOGIN`).
 
 ### 5.6 Giữ nguyên (đã đúng, không được làm hỏng)
 
@@ -156,9 +183,19 @@ gian phản hồi của "user không tồn tại" và "sai mật khẩu" xấp x
   `unset` CSRF → `SessionContract::set()` → 302.
 - Thông báo lỗi gộp *"Sai tên đăng nhập hoặc mật khẩu."*
 - `?redirect=` luôn đi qua `RedirectSanitizer::sanitize()`.
-- `config/db.php` chỉ `require` khi POST đã qua CSRF — GET không mở kết nối DB.
+- `config/db.php` chỉ `require` khi POST đã qua CSRF và username/mật khẩu hợp lệ về hình thức — GET không mở kết nối DB.
 - Escape mọi output bằng `htmlspecialchars(..., ENT_QUOTES, 'UTF-8')`.
 - Form hoạt động được khi JS bị tắt.
+
+### 5.7 Đăng xuất và cấu hình DB
+
+- `logout.php` vẫn là GET (các dự án đang link vào), nhưng từ chối — giữ phiên, 303 về login — khi
+  `Sec-Fetch-Site: cross-site` hoặc `Sec-Fetch-Dest` khác `document`; khi trình duyệt không gửi `Sec-Fetch-*`
+  thì Origin/Referer lạ hoặc `null` cũng bị từ chối; không có header nào thì cho phép. Hệ quả: dự án ở
+  *site khác* (kể cả nằm trong `SHARED_AUTH_ALLOWED_HOSTS`) không đăng xuất bằng link cross-site được.
+- `config/db.php` đọc đường dẫn từ env `SHARED_AUTH_DB_CONFIG` (mặc định `C:/xampp/config/db.php`); không
+  còn fallback `root`/mật khẩu rỗng, `mysqli_report` bật strict tường minh; thiếu/sai cấu hình thì ghi
+  `error_log` chi tiết và trả HTTP 500 với thông báo chung *"Lỗi kết nối cơ sở dữ liệu."*
 
 ---
 
@@ -167,7 +204,7 @@ gian phản hồi của "user không tồn tại" và "sai mật khẩu" xấp x
 ### 6.1 Giữ lại giá trị đã nhập khi đăng nhập sai — BẮT BUỘC
 
 Sau POST thất bại, ô `username` phải được điền lại từ `$_POST['username']` (đã escape).
-**Không bao giờ** điền lại mật khẩu. Focus tự động nhảy vào ô **mật khẩu**.
+**Không bao giờ** điền lại mật khẩu. Focus tự động nhảy vào ô **mật khẩu** (trừ khi username bị bỏ vì không hợp lệ: khi đó focus ô tên đăng nhập, xem 6.5).
 
 ### 6.2 Thông báo lỗi không tự biến mất
 
@@ -183,22 +220,24 @@ ban đầu khi trang được khôi phục từ bfcache (bấm Back). Đây là 
 ### 6.4 Đổi nhãn "Ghi nhớ đăng nhập"
 
 Nhãn mới: **"Ghi nhớ tên đăng nhập"**. Checkbox chỉ lưu username vào `localStorage`, không
-ảnh hưởng thời hạn phiên (phiên vốn 7 ngày cho mọi người). Nhãn cũ nói sai chức năng.
+ảnh hưởng thời hạn phiên (phiên vốn trượt 30 ngày cho mọi người, trần tuyệt đối 30 ngày). Nhãn cũ nói sai chức năng.
 
 Thêm dòng ghi chú nhỏ dưới checkbox khi được tick:
 *"Chỉ lưu tên đăng nhập trên máy này."*
 
 ### 6.5 Không tranh chấp focus
 
-Thứ tự duy nhất, quyết định **phía server** bằng thuộc tính `autofocus`:
+Thứ tự duy nhất, quyết định **phía server** bằng thuộc tính `autofocus`. Quy tắc: username trống → focus
+tên đăng nhập, ngược lại → focus mật khẩu; `aria-invalid` chỉ đặt trên ô gây lỗi:
 
 | Tình huống | Ô được focus |
 |---|---|
 | Lần đầu, không có username lưu sẵn | Tên đăng nhập |
 | Có username lưu sẵn (`localStorage`) | Mật khẩu |
-| Vừa đăng nhập sai | Mật khẩu |
+| Vừa đăng nhập sai (username còn giữ lại) | Mật khẩu |
+| Vừa đăng nhập sai nhưng username bị bỏ (không hợp lệ / không giữ được) | Tên đăng nhập |
 
-JS **không** được gọi `.focus()` sau `DOMContentLoaded` trong trường hợp 1 và 3 — chỉ được
+JS **không** được gọi `.focus()` sau `DOMContentLoaded` trong trường hợp 1, 3 và 4 — chỉ được
 phép trong trường hợp 2 (vì server không biết localStorage). Kèm điều kiện: chỉ focus nếu
 `document.activeElement` vẫn là `body` (user chưa gõ gì).
 
@@ -418,7 +457,7 @@ $viewData = [
     'originLabel'    => $originLabel,    // ?string
     'reason'         => $reason,         // ?string: 'expired' | 'denied' | null
     'oldUsername'    => $oldUsername,    // string, luôn escape khi in
-    'lockedMinutes'  => $lockedMinutes,  // ?int số phút còn lại, null nếu không bị khoá
+    'credentialError' => $credentialError, // bool: lỗi do thông tin đăng nhập → đặt aria-invalid
 ];
 require __DIR__ . '/../views/login.php';
 ```
@@ -438,10 +477,10 @@ require __DIR__ . '/../views/login.php';
 - [ ] POST đúng → 302 về `?redirect=` đã sanitize, cookie `HTSSOSESSID` path `/`, HttpOnly.
 - [ ] Đã đăng nhập mà vào lại `/index.php` → 302 thẳng, không hiện form.
 - [ ] Sai mật khẩu → form giữ nguyên username, ô mật khẩu được focus.
-- [ ] Sai 5 lần → HTTP 429 + thông báo còn N phút; đúng mật khẩu vẫn bị chặn trong thời gian khoá.
-- [ ] Đăng nhập thành công → bộ đếm sai của username đó bị xoá.
+- [ ] Cùng một IP sai 5 lần với một username → HTTP 429 + thông báo còn N phút; đúng mật khẩu vẫn bị chặn trong thời gian khoá; IP khác vẫn đăng nhập được username đó.
+- [ ] Đăng nhập thành công → bộ đếm `p:` và `u:` của username đó bị xoá.
 - [ ] Bảng `auth_login_attempts` không tồn tại → vẫn đăng nhập được (fail-open) + có log.
-- [ ] `?reason=expired` hiện banner vàng đúng nội dung; `?reason=<rác>` bị bỏ qua.
+- [ ] `?reason=expired` hiện banner vàng đúng nội dung; `?reason=<rác>` bị bỏ qua; POST thì không hiện banner `reason`.
 
 ### Bảo mật
 

@@ -2,34 +2,44 @@
 
 ### Requirement: Storage theo môi trường
 
-Local Laragon dùng file save_path riêng của hệ thống auth; production lưu phiên qua MySQL session
-handler. Handler production phải được nối sẵn trong đường bootstrap chung, không để chỗ gọi tự truyền.
+Phiên luôn lưu trong một thư mục save_path **riêng của hệ thống auth**, cấu hình qua
+`SHARED_AUTH_SESSION_PATH`; không dùng MySQL session handler (package không tự mở DB connection, và hợp
+đồng 2 điểm chạm không có chỗ truyền handler). Local mặc định là `<php.ini session.save_path>/htsso-sessions`
+(không phụ thuộc biến `TEMP`); production **bắt buộc** khai báo, thư mục nằm ngoài webroot, Apache ghi
+được, không dùng chung với ứng dụng khác.
 
-Khi môi trường là production mà không dựng được handler, hệ thống phải **dừng và báo lỗi**, không
-được âm thầm rơi về `save_path` mặc định của php.ini — đó là save_path dùng chung với mọi ứng dụng
-khác trên máy.
+Khi thư mục thiếu hoặc không ghi được (production không khai báo env cũng tính là thiếu), hệ thống phải
+**dừng và báo lỗi** — request web trả HTTP 500 — không được âm thầm rơi về `save_path` mặc định của
+php.ini: đó là save_path dùng chung với mọi ứng dụng khác trên máy, GC của app khác sẽ xoá phiên SSO.
 
 #### Scenario: Chạy trên production
-- **WHEN** ứng dụng chạy ở môi trường production
-- **THEN** phiên được lưu qua MySQL session handler thay vì file mặc định
+- **WHEN** ứng dụng chạy ở môi trường production với `SHARED_AUTH_SESSION_PATH` hợp lệ
+- **THEN** phiên được lưu thành file trong thư mục đó, không phải save_path của php.ini
 
-#### Scenario: Không dựng được handler ở production
-- **WHEN** môi trường là production nhưng không kết nối được nơi lưu phiên
-- **THEN** request dừng với lỗi rõ ràng, không có phiên nào được tạo trên save_path dùng chung
+#### Scenario: Production thiếu hoặc sai thư mục phiên
+- **WHEN** môi trường là production nhưng `SHARED_AUTH_SESSION_PATH` không đặt, hoặc thư mục không tồn tại/không ghi được
+- **THEN** request dừng với lỗi rõ ràng (HTTP 500 trên SAPI web, lỗi vào `error_log`), không có phiên nào được tạo trên save_path dùng chung
+
+#### Scenario: Thư mục phiên không nằm trong webroot
+- **WHEN** hệ thống được triển khai
+- **THEN** file phiên không truy cập được qua web; Apache chỉ phục vụ `public/`, mọi đường dẫn khác của authV2 trả 403
 
 #### Scenario: App login dùng đúng storage của môi trường
 - **WHEN** trang login chạy ở production
-- **THEN** phiên nó tạo nằm ở cùng storage với phiên mà các dự án khác đọc
+- **THEN** phiên nó tạo nằm ở cùng thư mục với phiên mà các dự án khác đọc
 
 ### Requirement: Thời hạn phiên chuẩn hoá
 
-Phiên hết hạn sau 7 ngày kể từ thao tác cuối; cookie được gia hạn ở mỗi request. Ngoài hạn theo hoạt
-động đó còn một **trần tuyệt đối** tính từ `logged_in_at`: quá trần thì phải đăng nhập lại dù vẫn
-đang hoạt động. Trần cấu hình được, đặt `0` là tắt.
+Phiên hết hạn sau **30 ngày** kể từ thao tác cuối (`EnvConfig::SESSION_LIFETIME`); cookie được gia hạn ở
+mỗi request — kể cả ở dự án chạy `auto_prepend_file`, vì `Guard::requireLogin()` tự mở/gia hạn phiên. Ngoài
+hạn theo hoạt động đó còn một **trần tuyệt đối** tính từ `logged_in_at`: mặc định 30 ngày
+(`SHARED_AUTH_ABSOLUTE_LIFETIME`, đơn vị giây), quá trần thì phải đăng nhập lại dù vẫn đang hoạt động. Đặt `0` là
+tắt. Phiên thiếu `logged_in_at` không bao giờ được coi là đã đăng nhập; khi trần bật, `logged_in_at` không phải
+số nguyên dương cũng bị từ chối.
 
 #### Scenario: Gia hạn theo hoạt động
-- **WHEN** user thao tác trong vòng 7 ngày kể từ lần trước
-- **THEN** hạn cookie được đẩy tiếp 7 ngày, phiên không bị mất
+- **WHEN** user thao tác trong vòng 30 ngày kể từ lần trước
+- **THEN** hạn cookie được đẩy tiếp 30 ngày, phiên không bị mất (trong giới hạn trần tuyệt đối)
 
 #### Scenario: Vượt trần tuyệt đối
 - **WHEN** phiên đã quá trần tuyệt đối kể từ `logged_in_at`, dù user vẫn dùng đều
@@ -37,8 +47,7 @@ Phiên hết hạn sau 7 ngày kể từ thao tác cuối; cookie được gia h
 
 #### Scenario: Tắt trần tuyệt đối
 - **WHEN** trần được cấu hình bằng `0`
-- **THEN** chỉ hạn 7 ngày theo hoạt động có hiệu lực, như hành vi trước đây
-
+- **THEN** chỉ hạn 30 ngày theo hoạt động có hiệu lực, như hành vi trước đây
 ## ADDED Requirements
 
 ### Requirement: Cookie phiên quyết định theo môi trường, không theo từng request

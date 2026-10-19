@@ -58,3 +58,23 @@ Phản hồi cho người dùng khi sai mật khẩu và khi không có tài kho
 #### Scenario: Thử username không tồn tại
 - **WHEN** ai đó POST login với username không có trong `user`
 - **THEN** thông báo trả về giống hệt trường hợp sai mật khẩu
+
+### Requirement: Lỗi hạ tầng và dữ liệu mơ hồ không thành "đăng nhập được" hay "sai mật khẩu"
+
+Lỗi DB khi xác thực ném `AuthBackendException` (phía gọi hiển thị lỗi hệ thống, HTTP 503). Username khớp nhiều hơn một
+dòng trong `user` bị từ chối và ghi `error_log`, không chọn đại một dòng. Công tắc nâng cấp hash mặc định TẮT khi
+không được truyền tường minh. Mọi nhánh trả null mà chưa chạy bcrypt thật đều chạy `password_hash` ở cost mặc định để
+thời gian phản hồi không phân biệt "không có tài khoản" với "sai mật khẩu"; tham số mật khẩu đánh dấu
+`#[\SensitiveParameter]`.
+
+#### Scenario: DB lỗi giữa chừng
+- **WHEN** truy vấn tra cứu user ném lỗi DB
+- **THEN** verifier ném `AuthBackendException`, không trả null
+
+#### Scenario: Username khớp hai dòng
+- **WHEN** collation không phân biệt hoa/thường làm username khớp hơn một dòng
+- **THEN** xác thực bị từ chối (null) và có dòng `error_log`
+
+#### Scenario: Công tắc nâng cấp không truyền
+- **WHEN** verifier được tạo không có tuỳ chọn `upgradeOnLogin` và user login đúng bằng password plaintext
+- **THEN** không có thao tác ghi nào lên bảng `user`
