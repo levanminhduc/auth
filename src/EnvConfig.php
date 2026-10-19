@@ -8,6 +8,8 @@ final class EnvConfig
 {
     public const SESSION_LIFETIME = 30 * 24 * 60 * 60;
 
+    public const ABSOLUTE_LIFETIME_DEFAULT = 30 * 24 * 60 * 60;
+
     public const SESSION_NAME_DEFAULT = 'HTSSOSESSID';
 
     public static function env(): string
@@ -153,15 +155,57 @@ final class EnvConfig
         return $best;
     }
 
-    public static function sessionSavePath(): ?string
+    /**
+     * Không bao giờ trả null để rơi về `session.save_path` của php.ini: thư mục đó dùng chung với mọi
+     * vhost khác, GC của app khác sẽ xoá phiên SSO. Cấu hình sai thì dừng, không chạy tiếp.
+     */
+    public static function sessionSavePath(): string
     {
-        if (self::isProduction()) {
-            return null;
+        $configured = getenv('SHARED_AUTH_SESSION_PATH');
+        if ($configured !== false && trim($configured) !== '') {
+            $dir = trim($configured);
+        } elseif (self::isProduction()) {
+            throw new \RuntimeException(
+                'Thiếu SHARED_AUTH_SESSION_PATH: production bắt buộc có thư mục lưu phiên riêng, nằm ngoài webroot.'
+            );
+        } else {
+            $dir = self::localDefaultSessionPath();
         }
-        $dir = dirname(__DIR__) . '/storage/sessions';
+
         if (!is_dir($dir)) {
             @mkdir($dir, 0700, true);
         }
-        return (is_dir($dir) && is_writable($dir)) ? $dir : null;
+        if (!is_dir($dir) || !is_writable($dir)) {
+            throw new \RuntimeException(
+                'Thư mục lưu phiên không tồn tại hoặc không ghi được (SHARED_AUTH_SESSION_PATH): ' . $dir
+            );
+        }
+        return $dir;
+    }
+
+    // WHY: get_cfg_var đọc giá trị php.ini gốc, không bị session_save_path() lúc chạy ghi đè, và
+    // không phụ thuộc biến môi trường TEMP (tiến trình thiếu TEMP thì sys_get_temp_dir() = C:\Windows).
+    private static function localDefaultSessionPath(): string
+    {
+        $base = (string) get_cfg_var('session.save_path');
+        $pos = strrpos($base, ';');
+        if ($pos !== false) {
+            $base = substr($base, $pos + 1);
+        }
+        $base = trim($base);
+        if ($base === '') {
+            $base = sys_get_temp_dir();
+        }
+        return rtrim($base, '/\\') . '/htsso-sessions';
+    }
+
+    public static function absoluteLifetime(): int
+    {
+        $v = getenv('SHARED_AUTH_ABSOLUTE_LIFETIME');
+        if ($v === false) {
+            return self::ABSOLUTE_LIFETIME_DEFAULT;
+        }
+        $v = trim($v);
+        return ctype_digit($v) ? (int) $v : self::ABSOLUTE_LIFETIME_DEFAULT;
     }
 }

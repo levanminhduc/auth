@@ -155,13 +155,110 @@ test('sessionName: mặc định HTSSOSESSID', function (): void {
     );
 });
 
-test('sessionSavePath: BASELINE production trả null → rơi về save_path chung (task 2.1 sẽ vá)', function (): void {
-    $local = with_env(['SHARED_AUTH_ENV' => 'local'], static fn () => EnvConfig::sessionSavePath());
-    assert_true(is_string($local), 'local có thư mục riêng');
-    assert_contains('storage', (string) $local, 'local dùng storage/sessions');
+function with_scratch_dir(callable $fn): void
+{
+    $base = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'authv2_envcfg_' . bin2hex(random_bytes(4));
+    mkdir($base, 0700, true);
+    try {
+        $fn($base);
+    } finally {
+        foreach (glob($base . '/*/*') ?: [] as $f) {
+            @unlink($f);
+        }
+        foreach (glob($base . '/*') ?: [] as $f) {
+            is_dir($f) ? @rmdir($f) : @unlink($f);
+        }
+        @rmdir($base);
+    }
+}
 
-    assert_null(
-        with_env(['SHARED_AUTH_ENV' => 'production'], static fn () => EnvConfig::sessionSavePath()),
-        'hiện tại production trả null = dùng save_path mặc định của php.ini; sau task 2.1 phải là thư mục riêng'
+test('sessionSavePath: SHARED_AUTH_SESSION_PATH được dùng và tạo nếu thiếu (task 2.1)', function (): void {
+    with_scratch_dir(static function (string $base): void {
+        $dir = $base . '/sess';
+        foreach (['local', 'production'] as $env) {
+            $path = with_env(
+                ['SHARED_AUTH_ENV' => $env, 'SHARED_AUTH_SESSION_PATH' => $dir],
+                static fn () => EnvConfig::sessionSavePath()
+            );
+            assert_same($dir, $path, $env);
+            assert_true(is_dir($dir) && is_writable($dir), $env . ' thư mục đã tạo');
+        }
+    });
+});
+
+test('sessionSavePath: local không đặt env thì dùng thư mục tạm NGOÀI repo, không phải storage/ (task 2.1)', function (): void {
+    $path = with_env(
+        ['SHARED_AUTH_ENV' => 'local', 'SHARED_AUTH_SESSION_PATH' => null],
+        static fn () => EnvConfig::sessionSavePath()
     );
+    $iniBase = trim((string) get_cfg_var('session.save_path'));
+    $iniBase = ($p = strrpos($iniBase, ';')) !== false ? substr($iniBase, $p + 1) : $iniBase;
+    $expectedBase = $iniBase !== '' ? $iniBase : sys_get_temp_dir();
+    assert_same(rtrim($expectedBase, '/\\') . '/htsso-sessions', $path, 'thư mục con của save_path php.ini, không phụ thuộc TEMP');
+    assert_true(is_dir($path) && is_writable($path));
+
+    $repo = str_replace('\\', '/', (string) realpath(dirname(__DIR__, 2)));
+    $real = str_replace('\\', '/', (string) realpath($path));
+    assert_false(str_starts_with(strtolower($real) . '/', strtolower($repo) . '/'), 'nằm ngoài repo/webroot');
+});
+
+test('sessionSavePath: env rỗng coi như chưa đặt', function (): void {
+    $local = with_env(
+        ['SHARED_AUTH_ENV' => 'local', 'SHARED_AUTH_SESSION_PATH' => ''],
+        static fn () => EnvConfig::sessionSavePath()
+    );
+    assert_contains('htsso-sessions', $local);
+
+    $threw = false;
+    try {
+        with_env(['SHARED_AUTH_ENV' => 'production', 'SHARED_AUTH_SESSION_PATH' => '  '], static fn () => EnvConfig::sessionSavePath());
+    } catch (RuntimeException $e) {
+        $threw = true;
+    }
+    assert_true($threw, 'production + env rỗng phải ném lỗi');
+});
+
+test('sessionSavePath: production không đặt env thì ném lỗi nêu tên biến, KHÔNG trả null (task 2.1)', function (): void {
+    try {
+        with_env(
+            ['SHARED_AUTH_ENV' => 'production', 'SHARED_AUTH_SESSION_PATH' => null],
+            static fn () => EnvConfig::sessionSavePath()
+        );
+    } catch (RuntimeException $e) {
+        assert_contains('SHARED_AUTH_SESSION_PATH', $e->getMessage());
+        return;
+    }
+    fail_test('production thiếu SHARED_AUTH_SESSION_PATH phải ném RuntimeException');
+});
+
+test('sessionSavePath: thư mục không tạo được thì ném lỗi, không rơi về save_path chung (task 2.1)', function (): void {
+    with_scratch_dir(static function (string $base): void {
+        $file = $base . '/is_a_file';
+        file_put_contents($file, 'x');
+        foreach (['local', 'production'] as $env) {
+            $threw = false;
+            try {
+                with_env(
+                    ['SHARED_AUTH_ENV' => $env, 'SHARED_AUTH_SESSION_PATH' => $file . '/sub'],
+                    static fn () => EnvConfig::sessionSavePath()
+                );
+            } catch (RuntimeException $e) {
+                $threw = true;
+                assert_contains('SHARED_AUTH_SESSION_PATH', $e->getMessage(), $env);
+            }
+            assert_true($threw, $env . ' phải ném lỗi');
+        }
+    });
+});
+
+test('absoluteLifetime: mặc định 30 ngày, 0 là tắt, giá trị hỏng về mặc định (task 3.8)', function (): void {
+    $get = static fn (?string $v) => with_env(['SHARED_AUTH_ABSOLUTE_LIFETIME' => $v], static fn () => EnvConfig::absoluteLifetime());
+    assert_same(2592000, $get(null), 'không đặt');
+    assert_same(2592000, $get(''), 'rỗng');
+    assert_same(0, $get('0'), '0 = tắt');
+    assert_same(3600, $get('3600'));
+    assert_same(3600, $get(' 3600 '), 'khoảng trắng');
+    assert_same(2592000, $get('-5'), 'âm không được hiểu là tắt');
+    assert_same(2592000, $get('abc'), 'không phải số');
+    assert_same(2592000, $get('1.5'), 'số thực');
 });
