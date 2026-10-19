@@ -43,7 +43,11 @@ final class RedirectSanitizer
         }
 
         $path = $parts['path'] ?? '/';
-        if ($path === '' || $path[0] !== '/' || !self::isAllowedPath($path)) {
+        if ($path === '' || $path[0] !== '/') {
+            return null;
+        }
+        $path = self::allowedPathOrNull($path);
+        if ($path === null) {
             return null;
         }
 
@@ -91,70 +95,55 @@ final class RedirectSanitizer
         return $scheme . '://' . $authority;
     }
 
-    private static function isAllowedPath(string $path): bool
+    /**
+     * Trả về path đã chuẩn hoá (và mã hoá lại) nếu được phép. Phải trả bản chuẩn hoá chứ không phải bản thô:
+     * allowlist đã duyệt path SAU khi rút gọn `..`, nên bản thô có thể trỏ sang dự án khác với bản đã duyệt
+     * (và bị gắn nhãn dự án sai).
+     */
+    private static function allowedPathOrNull(string $path): ?string
     {
-        $normalized = self::normalizePath(rawurldecode($path));
+        // WHY: path mơ hồ (`%2f`, `%5c`, `%25`) có độ sâu thật phụ thuộc server/proxy nên không thể chứng minh nó nằm ngoài vùng cấm; từ chối hẳn thay vì đoán. Chuẩn hoá giải mã đúng một lượt, không giải mã trước rồi mới gọi.
+        if (PathNormalizer::isAmbiguous($path)) {
+            return null;
+        }
+
+        $normalized = PathNormalizer::normalize($path);
         if (self::hasUnsafeChars($normalized)) {
-            return false;
+            return null;
         }
 
-        foreach (self::selfPaths() as $selfPath) {
-            if ($normalized === $selfPath) {
-                return false;
+        $base = self::normalizedBase();
+        $lower = strtolower($normalized);
+        // WHY: allowlist, không phải blocklist — mọi thứ dưới base đều bị loại (logout.php/x, Logout.php, assets, ...) trừ trang đích portal.php. Apache trên Windows không phân biệt hoa/thường và chấp nhận PATH_INFO, nên so khớp chính xác từng file là không đủ.
+        if ($base === '') {
+            // WHY: base là gốc site thì "dưới base" là mọi path; chỉ portal.php được miễn, còn lại phải khớp prefix dự án (index.php, logout.php và mọi biến thể không có prefix nào nên bị loại).
+            if ($lower === '/portal.php') {
+                return self::encodePath($normalized);
             }
+        } elseif ($lower === $base || str_starts_with($lower, $base . '/')) {
+            return $lower === $base . '/portal.php' ? self::encodePath($normalized) : null;
         }
 
-        foreach (self::allowedPrefixes() as $prefix) {
+        foreach (array_keys(EnvConfig::projects()) as $prefix) {
             if (str_starts_with($normalized, $prefix)) {
-                return true;
+                return self::encodePath($normalized);
             }
         }
-        return false;
+        return null;
     }
 
-    /**
-     * @return list<string>
-     */
-    private static function allowedPrefixes(): array
+    // WHY: normalize() đã giải mã; ký tự như `?`, `#`, khoảng trắng sinh ra từ `%3f`, `%23`, `%20` phải mã hoá lại, nếu không chúng đổi nghĩa (cắt path, mở query/fragment) khi ghép vào URL.
+    private static function encodePath(string $path): string
     {
-        $prefixes = array_keys(EnvConfig::projects());
-        $prefixes[] = rtrim(EnvConfig::baseUrl(), '/') . '/';
-        return $prefixes;
+        return preg_replace_callback(
+            '#[^A-Za-z0-9\-._~!$&\'()*+,;=:@/]#',
+            static fn (array $m): string => rawurlencode($m[0]),
+            $path
+        );
     }
 
-    /**
-     * Redirect về chính trang login/logout/thư mục gốc của authV2 sẽ tạo vòng lặp.
-     *
-     * @return list<string>
-     */
-    private static function selfPaths(): array
+    private static function normalizedBase(): string
     {
-        $base = rtrim(EnvConfig::baseUrl(), '/');
-        return [$base, $base . '/', $base . '/index.php', $base . '/logout.php'];
-    }
-
-    /**
-     * Gỡ `.` và `..` trước khi so prefix, nếu không `/nhansuhtdb/../authV2/public/logout.php`
-     * sẽ lọt allowlist rồi mới được trình duyệt rút gọn thành path khác hẳn.
-     */
-    private static function normalizePath(string $path): string
-    {
-        $segments = [];
-        foreach (explode('/', $path) as $segment) {
-            if ($segment === '' || $segment === '.') {
-                continue;
-            }
-            if ($segment === '..') {
-                array_pop($segments);
-                continue;
-            }
-            $segments[] = $segment;
-        }
-
-        $normalized = '/' . implode('/', $segments);
-        if ($normalized !== '/' && str_ends_with($path, '/')) {
-            $normalized .= '/';
-        }
-        return $normalized;
+        return rtrim(strtolower(PathNormalizer::normalize(EnvConfig::baseUrl())), '/');
     }
 }
