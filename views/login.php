@@ -2,19 +2,6 @@
 
 declare(strict_types=1);
 
-/**
- * $viewData keys:
- * - config (array)
- * - error (?string)
- * - csrf (string)
- * - redirectTarget (string)
- * - originLabel (?string)
- * - reason (?string)
- * - oldUsername (string)
- * - lockedMinutes (?int)
- * - credentialError (bool)
- */
-
 require __DIR__ . '/partials/icon.php';
 
 $e = static fn (?string $v): string => htmlspecialchars($v ?? '', ENT_QUOTES, 'UTF-8');
@@ -28,8 +15,9 @@ $reason          = $viewData['reason'];
 $oldUsername     = $viewData['oldUsername'];
 $credentialError = (bool) $viewData['credentialError'];
 
-$usernameAutofocus = $oldUsername === '' && $error === null;
-$passwordAutofocus = $oldUsername !== '' || $error !== null;
+$usernameAutofocus = $oldUsername === '';
+$usernameInvalid   = $credentialError && $oldUsername === '';
+$passwordInvalid   = $credentialError && $oldUsername !== '';
 ?>
 <!DOCTYPE html>
 <html lang="vi">
@@ -94,23 +82,23 @@ $passwordAutofocus = $oldUsername !== '' || $error !== null;
                         <label for="username" class="text-[14px] font-medium flex items-center gap-2">
                             <?= icon('user', 'w-4 h-4') ?>
                             Tên đăng nhập
-                            <?php if ($credentialError): ?>
+                            <?php if ($usernameInvalid): ?>
                                 <?= icon('alert-triangle', 'w-4 h-4 text-danger-ink') ?>
                             <?php endif; ?>
                         </label>
-                        <input type="text" id="username" name="username" autocomplete="username" required class="field-input" value="<?= $e($oldUsername) ?>"<?php if ($usernameAutofocus): ?> autofocus<?php endif; ?><?php if ($credentialError): ?> aria-invalid="true"<?php endif; ?>>
+                        <input type="text" id="username" name="username" autocomplete="username" required class="field-input" value="<?= $e($oldUsername) ?>"<?php if ($usernameAutofocus): ?> autofocus<?php endif; ?><?php if ($usernameInvalid): ?> aria-invalid="true"<?php endif; ?>>
                     </div>
 
                     <div class="flex flex-col gap-1">
                         <label for="password" class="text-[14px] font-medium flex items-center gap-2">
                             <?= icon('lock', 'w-4 h-4') ?>
                             Mật khẩu
-                            <?php if ($credentialError): ?>
+                            <?php if ($passwordInvalid): ?>
                                 <?= icon('alert-triangle', 'w-4 h-4 text-danger-ink') ?>
                             <?php endif; ?>
                         </label>
                         <div class="relative">
-                            <input type="password" id="password" name="password" autocomplete="current-password" required class="field-input pr-11"<?php if ($passwordAutofocus): ?> autofocus<?php endif; ?><?php if ($credentialError): ?> aria-invalid="true"<?php endif; ?>>
+                            <input type="password" id="password" name="password" autocomplete="current-password" required class="field-input pr-11"<?php if (!$usernameAutofocus): ?> autofocus<?php endif; ?><?php if ($passwordInvalid): ?> aria-invalid="true"<?php endif; ?>>
                             <template id="togglePasswordTemplate">
                                 <button type="button" class="absolute right-0 top-1/2 -translate-y-1/2 w-11 h-11 flex items-center justify-center text-ink-500 hover:text-ink-700 rounded-field focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-brand-500/25" aria-label="Hiện mật khẩu" aria-pressed="false" data-label-show="Hiện mật khẩu" data-label-hide="Ẩn mật khẩu">
                                     <?= icon('eye', 'w-5 h-5') ?>

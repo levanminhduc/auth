@@ -1,4 +1,5 @@
 $Version = "v4.1.18"
+$ExeSha256 = "55bc5a2e294520a74fe3523eaa11915ef50047e7228a545aa181ec413cf52612"
 $ErrorActionPreference = "Stop"
 
 $Root = $PSScriptRoot
@@ -7,32 +8,29 @@ $Exe = Join-Path $ToolsDir "tailwindcss.exe"
 $InputCss = Join-Path $Root "resources\css\app.css"
 $OutputCss = Join-Path $Root "public\assets\css\app.css"
 $Watch = $args -contains "-Watch"
-$NpxVersion = $Version.TrimStart("v")
 
-function Invoke-TailwindBuild {
-    param(
-        [string[]]$Command
-    )
-    $p = Start-Process -FilePath $Command[0] -ArgumentList $Command[1..($Command.Length - 1)] -Wait -PassThru -NoNewWindow
-    if ($p.ExitCode -ne 0) {
-        exit $p.ExitCode
-    }
+function Test-ExeHash {
+    param([string]$Path)
+    (Test-Path $Path) -and ((Get-FileHash -Path $Path -Algorithm SHA256).Hash -eq $ExeSha256)
 }
 
-if (-not (Test-Path $Exe)) {
+if (-not (Test-ExeHash $Exe)) {
     New-Item -ItemType Directory -Force -Path $ToolsDir | Out-Null
     $url = "https://github.com/tailwindlabs/tailwindcss/releases/download/$Version/tailwindcss-windows-x64.exe"
+    $partial = "$Exe.download"
+    Remove-Item -Force -ErrorAction SilentlyContinue $partial
     try {
-        Invoke-WebRequest -Uri $url -OutFile $Exe
+        Invoke-WebRequest -Uri $url -OutFile $partial
     } catch {
-        Write-Host "Tải tools/tailwindcss.exe thất bại, fallback npx @tailwindcss/cli@$NpxVersion"
-        & npx --yes "@tailwindcss/cli@$NpxVersion" -i $InputCss -o $OutputCss --minify $(if ($Watch) { "--watch" })
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        if (Test-Path $OutputCss) {
-            Write-Host ("output {0} bytes" -f (Get-Item $OutputCss).Length)
-        }
-        exit 0
+        Remove-Item -Force -ErrorAction SilentlyContinue $partial
+        throw "Tải tools/tailwindcss.exe thất bại ($($_.Exception.Message)). Hãy tải thủ công $url về $Exe, kiểm tra SHA256 phải là $ExeSha256 (Get-FileHash -Algorithm SHA256) rồi chạy lại."
     }
+    if (-not (Test-ExeHash $partial)) {
+        $actual = (Get-FileHash -Path $partial -Algorithm SHA256).Hash
+        Remove-Item -Force -ErrorAction SilentlyContinue $partial
+        throw "SHA256 của tailwindcss.exe $Version không khớp (mong đợi $ExeSha256, nhận $actual). Không dùng file này: hãy tải thủ công $url về $Exe, kiểm tra SHA256 phải là $ExeSha256 rồi chạy lại."
+    }
+    Move-Item -Force -Path $partial -Destination $Exe
 }
 
 & $Exe --help | Select-Object -First 1
