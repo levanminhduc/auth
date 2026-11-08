@@ -46,7 +46,7 @@ final class CredentialVerifier
         }
 
         $row = $rows[0] ?? null;
-        if ($row === null || !array_key_exists($this->passColumn, $row)) {
+        if ($row === null) {
             $this->burnVerifyCost($password);
             return null;
         }
@@ -57,11 +57,14 @@ final class CredentialVerifier
             return null;
         }
 
-        $stored = (string) $row[$this->passColumn];
+        $stored = (string) $row['password'];
 
         if ($this->looksHashed($stored)) {
             if (!password_verify($password, $stored)) {
                 return null;
+            }
+            if ($this->upgradeOnLogin && password_needs_rehash($stored, PASSWORD_DEFAULT)) {
+                $this->tryUpgradeHash($row, $password);
             }
         } else {
             if (!hash_equals($stored, $password)) {
@@ -69,16 +72,20 @@ final class CredentialVerifier
                 return null;
             }
             if ($this->upgradeOnLogin) {
-                try {
-                    $this->upgradeHash($row, $password);
-                } catch (\Throwable $e) {
-                    error_log('CredentialVerifier: không nâng cấp được hash cho user ' . $this->escapeForLog((string) ($row[$this->userColumn] ?? '')) . ': ' . $this->escapeForLog($e->getMessage(), 300));
-                }
+                $this->tryUpgradeHash($row, $password);
             }
         }
 
-        unset($row[$this->passColumn]);
-        return $row;
+        return ['id' => $row['id'], 'name' => $row['name']];
+    }
+
+    private function tryUpgradeHash(array $row, #[\SensitiveParameter] string $password): void
+    {
+        try {
+            $this->upgradeHash($row, $password);
+        } catch (\Throwable $e) {
+            error_log('CredentialVerifier: không nâng cấp được hash cho user ' . $this->escapeForLog((string) $row['name']) . ': ' . $this->escapeForLog($e->getMessage(), 300));
+        }
     }
 
     private function lookup(string $username): array
@@ -86,8 +93,10 @@ final class CredentialVerifier
         $t = $this->quoteIdent($this->table);
         $userCol = $this->quoteIdent($this->userColumn);
         $idCol = $this->quoteIdent($this->idColumn);
+        $passCol = $this->quoteIdent($this->passColumn);
 
-        $stmt = $this->conn->prepare("SELECT * FROM {$t} WHERE {$userCol} = ? ORDER BY {$idCol} LIMIT 2") ?: throw $this->dbError($this->conn);
+        // WHY: chỉ lấy đúng 3 cột và đặt alias cố định; SELECT * từng trả cả role/full_name/... ra ngoài package.
+        $stmt = $this->conn->prepare("SELECT {$idCol} AS `id`, {$userCol} AS `name`, {$passCol} AS `password` FROM {$t} WHERE {$userCol} = ? ORDER BY {$idCol} LIMIT 2") ?: throw $this->dbError($this->conn);
         $stmt->bind_param('s', $username);
         $stmt->execute() ?: throw $this->dbError($stmt);
         $result = $stmt->get_result() ?: throw $this->dbError($stmt);
@@ -112,14 +121,16 @@ final class CredentialVerifier
         return $encoded === false ? '"?"' : $encoded;
     }
 
+    // WHY: password_get_info chỉ nhận bcrypt dạng `$2y$`; hash `$2a$`/`$2b$` hợp lệ (vd. từ hệ thống khác) mà bị coi là plaintext thì chủ tài khoản không đăng nhập được.
     private function looksHashed(string $stored): bool
     {
-        return str_starts_with($stored, '$2');
+        return password_get_info($stored)['algo'] !== null
+            || preg_match('#^\$2[abxy]\$\d{2}\$[./A-Za-z0-9]{53}$#', $stored) === 1;
     }
 
     private function upgradeHash(array $row, #[\SensitiveParameter] string $plaintext): void
     {
-        $id = $row[$this->idColumn] ?? null;
+        $id = $row['id'] ?? null;
         if ($id === null) {
             return;
         }

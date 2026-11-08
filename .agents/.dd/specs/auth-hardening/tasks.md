@@ -29,9 +29,10 @@
 > và cờ `static $done` dùng chung mọi instance (3.3).
 >
 > **Đã lật có chủ ý:** `sessionSavePath` production trả null → ném lỗi (2.1); `isLoggedIn` nhận phiên
-> 10 năm → từ chối quá trần (3.8); `Guard::isPublic` với `..` và `%2e%2e` → không còn public (3.2).
-> **Còn mở:** `isSecure` (2.2), `CredentialVerifier` cột thừa (3.6) và tiền tố `$2` (3.5), `IdentitySync`
-> (3.3, 3.4) — các test này phải còn xanh cho tới khi đúng task đó được làm.
+> 10 năm → từ chối quá trần (3.8); `Guard::isPublic` với `..` và `%2e%2e` → không còn public (3.2);
+> cookie production + HTTP → `Secure` (2.2, qua `cookieSecure()`; `isSecure()` giữ nguyên theo request);
+> `IdentitySync` (3.3, 3.4); `CredentialVerifier` cột thừa (3.6) và tiền tố `$2` (3.5).
+> **Còn mở:** không còn `BASELINE` nào.
 
 ## 2. Nhóm A — chặn `shared-auth` task 2.8 (deploy production)
 
@@ -42,8 +43,12 @@
       `get_cfg_var`, không phụ thuộc `TEMP`); production thiếu env hoặc thư mục không ghi được → `RuntimeException`.
       `prepend.php` bắt lỗi, `error_log` và trả HTTP 500 trên SAPI web (CLI chạy tiếp). `storage/sessions` cũ bỏ
       (từng truy cập được qua web, file đã xoá); Apache chặn mọi thứ ngoài `public/` bằng conf ngoài repo
-- [ ] 2.2 `SessionBootstrap`: cờ cookie `Secure` quyết theo môi trường (`isProduction() || isSecure()`),
+- [x] 2.2 `SessionBootstrap`: cờ cookie `Secure` quyết theo môi trường (`isProduction() || isSecure()`),
       không để header client hạ được cờ
+      → `EnvConfig::cookieSecure()`, dùng trong `applySettings()`; `renewCookie()`/`destroy()` đọc lại từ
+      `session_get_cookie_params()` nên đồng bộ. `isSecure()` không đổi (logout dùng để suy scheme của chính nó).
+      ⚠️ Hệ quả: production **bắt buộc HTTPS** — truy cập production qua `http://` thì trình duyệt bỏ cookie
+      Secure, không đăng nhập được
 - [x] 2.3 `Guard::requireLogin()` tự gọi `SessionBootstrap::start()` trước khi đọc trạng thái — chặn
       vòng lặp 302 ở dự án chạy `auto_prepend_file` chỉ `configure()`
       → phiên chưa mở thì `start()`, đã mở thì `SessionBootstrap::renewCookie()` (không gửi `Set-Cookie` trùng
@@ -84,14 +89,22 @@
       → `isPublic()` chuẩn hoá bằng `PathNormalizer`, so không phân biệt hoa/thường (filesystem Windows); path mơ hồ
       (`\`, `%2f`, `%5c`, `%25`) thì không public. `currentPath()` cắt `?`/`#` thủ công thay `parse_url` (`//host/x`
       bị hiểu là authority). Hai BASELINE `..` và `%2e%2e` đã lật
-- [ ] 3.3 `IdentitySync`: bỏ `static $done` trong method non-static, đổi thành cờ theo từng instance
-- [ ] 3.4 `IdentitySync::normalize()`: thôi `htmlspecialchars` lúc ghi vào phiên. **Trước khi sửa,
+- [x] 3.3 `IdentitySync`: bỏ `static $done` trong method non-static, đổi thành cờ theo từng instance
+      → thuộc tính `private bool $done`
+- [x] 3.4 `IdentitySync::normalize()`: thôi `htmlspecialchars` lúc ghi vào phiên. **Trước khi sửa,
       grep `nhansuhtdb` xem chỗ nào đang hiển thị các key được sync mà không tự escape** — nếu có thì
       sửa chỗ hiển thị trong cùng bước, không tách ra
-- [ ] 3.5 `CredentialVerifier::looksHashed()` dùng `password_get_info()` thay tiền tố `$2` cứng; thêm
+      → `rg -uu` toàn `C:/laragon/www`: **không dự án nào gọi `IdentitySync`** (nhansuhtdb/sangkienct tự viết
+      helper riêng), nên không có chỗ hiển thị nào phải sửa. Giá trị giờ là thô (chỉ `trim`); `patterns.md` đã sửa
+- [x] 3.5 `CredentialVerifier::looksHashed()` dùng `password_get_info()` thay tiền tố `$2` cứng; thêm
       `password_needs_rehash` chịu chung công tắc `SHARED_AUTH_UPGRADE_ON_LOGIN` (đang TẮT → không ghi gì)
-- [ ] 3.6 `CredentialVerifier` chỉ SELECT cột cần (`id`, `name`, `password`) thay `SELECT *`; trả về
+      → nhận thêm bcrypt `$2a$`/`$2b$`/`$2x$` đúng định dạng (password_get_info chỉ biết `$2y$`); lỗi ghi rehash
+      chỉ `error_log`, không chặn đăng nhập
+- [x] 3.6 `CredentialVerifier` chỉ SELECT cột cần (`id`, `name`, `password`) thay `SELECT *`; trả về
       đúng `id` + `name`
+      → SELECT `idColumn`/`userColumn`/`passColumn` với alias cố định `id`/`name`/`password`, trả `['id','name']`
+      kể cả khi tên cột tuỳ biến. Hành vi đổi: cấu hình sai cột password giờ là `AuthBackendException` (503),
+      không còn âm thầm thành "sai mật khẩu"
 - [x] 3.7 Thông báo lỗi login giống hệt nhau giữa "sai mật khẩu" và "không có tài khoản"
       → làm ở change `login-redesign` (đã đúng từ trước, có test)
 - [x] 3.8 Trần tuyệt đối: `SHARED_AUTH_ABSOLUTE_LIFETIME` (mặc định 30 ngày, `0` = tắt), kiểm trong

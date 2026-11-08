@@ -39,7 +39,7 @@ test('env: chỉ đúng chuỗi "production" mới là production', function ():
     assert_same('local', with_env(['SHARED_AUTH_ENV' => 'prod'], static fn () => EnvConfig::env()), 'viết tắt');
 });
 
-test('isSecure: BASELINE quyết theo request chứ không theo môi trường (task 2.2 sẽ đổi)', function (): void {
+test('isSecure: chỉ phản ánh request hiện tại (logout dùng để suy scheme), không theo môi trường', function (): void {
     $secure = static fn () => EnvConfig::isSecure();
 
     assert_false(
@@ -53,14 +53,33 @@ test('isSecure: BASELINE quyết theo request chứ không theo môi trường (
         'header do client gửi cũng được tin'
     );
 
-    // Điểm mấu chốt của task 2.2: production + request HTTP vẫn ra false.
     assert_false(
         with_env(
             ['SHARED_AUTH_ENV' => 'production'],
             static fn () => with_server(['HTTPS' => null, 'HTTP_X_FORWARDED_PROTO' => null], $secure)
         ),
-        'hiện tại production + HTTP ra false → cookie mất cờ Secure; sau task 2.2 phải là true'
+        'production + HTTP: isSecure vẫn false; cờ cookie do cookieSecure() quyết'
     );
+});
+
+test('cookieSecure: production luôn true, header client không hạ được; local theo request (task 2.2)', function (): void {
+    $cookie = static fn () => EnvConfig::cookieSecure();
+    $prod = static fn (array $server) => with_env(
+        ['SHARED_AUTH_ENV' => 'production'],
+        static fn () => with_server($server, $cookie)
+    );
+    $local = static fn (array $server) => with_env(
+        ['SHARED_AUTH_ENV' => null],
+        static fn () => with_server($server, $cookie)
+    );
+
+    assert_true($prod(['HTTPS' => null, 'HTTP_X_FORWARDED_PROTO' => null]), 'production + HTTP');
+    assert_true($prod(['HTTPS' => null, 'HTTP_X_FORWARDED_PROTO' => 'http']), 'production + X-Forwarded-Proto: http');
+    assert_true($prod(['HTTPS' => 'off', 'HTTP_X_FORWARDED_PROTO' => null]), 'production + HTTPS=off');
+    assert_true($prod(['HTTPS' => 'on', 'HTTP_X_FORWARDED_PROTO' => null]), 'production + HTTPS');
+
+    assert_false($local(['HTTPS' => null, 'HTTP_X_FORWARDED_PROTO' => null]), 'local + HTTP');
+    assert_true($local(['HTTPS' => 'on', 'HTTP_X_FORWARDED_PROTO' => null]), 'local + HTTPS');
 });
 
 test('upgradeOnLogin: mặc định TẮT, chỉ bật bằng giá trị khẳng định', function (): void {

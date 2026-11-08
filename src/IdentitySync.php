@@ -12,6 +12,7 @@ final class IdentitySync
     private string $table;
     private string $idColumn;
     private array $columns;
+    private bool $done = false;
 
     public function __construct(mysqli $conn, array $options = [])
     {
@@ -23,8 +24,7 @@ final class IdentitySync
 
     public function sync(): bool
     {
-        static $done = false;
-        if ($done) {
+        if ($this->done) {
             return true;
         }
 
@@ -64,13 +64,14 @@ final class IdentitySync
             }
         }
 
-        $done = true;
+        $this->done = true;
         return true;
     }
 
+    // WHY: phiên giữ giá trị thô; escape là việc của chỗ in ra HTML (escape lúc ghi làm hỏng mọi nơi dùng giá trị không phải HTML và gây escape hai lần).
     private function normalize($value): string
     {
-        return htmlspecialchars(trim((string) ($value ?? '')), ENT_QUOTES, 'UTF-8');
+        return trim((string) ($value ?? ''));
     }
 
     private function quoteIdent(string $ident): string

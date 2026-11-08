@@ -241,6 +241,19 @@ test('prepend.php: cấu hình lỗi vẫn được log, CLI chạy tiếp (nhá
     assert_contains('SHARED_AUTH_SESSION_PATH', $run['err'], 'lỗi vẫn được log ra stderr');
 });
 
+test('SessionBootstrap: production đặt cookie Secure cả khi request là HTTP / X-Forwarded-Proto: http (task 2.2)', function (): void {
+    $body = "\$_SERVER['HTTP_X_FORWARDED_PROTO'] = 'http';\n"
+        . "unset(\$_SERVER['HTTPS']);\n"
+        . "Hoatho\\SharedAuth\\SessionBootstrap::configure();\n"
+        . "echo session_get_cookie_params()['secure'] ? 'secure' : 'plain';\n";
+
+    $prod = guard_run_script($body, ['SHARED_AUTH_ENV' => 'production', 'SHARED_AUTH_SESSION_PATH' => sys_get_temp_dir()]);
+    assert_same('secure', $prod['out'], $prod['err']);
+
+    $local = guard_run_script($body);
+    assert_same('plain', $local['out'], 'local + HTTP vẫn không Secure: ' . $local['err']);
+});
+
 function guard_reset_cap_flag(): void
 {
     (new ReflectionProperty(Hoatho\SharedAuth\SessionContract::class, 'capExpired'))->setValue(null, false);

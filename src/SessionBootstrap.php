@@ -46,7 +46,7 @@ final class SessionBootstrap
             'lifetime' => EnvConfig::SESSION_LIFETIME,
             'path'     => '/',
             'domain'   => '',
-            'secure'   => EnvConfig::isSecure(),
+            'secure'   => EnvConfig::cookieSecure(),
             'httponly' => true,
             'samesite' => 'Lax',
         ]);

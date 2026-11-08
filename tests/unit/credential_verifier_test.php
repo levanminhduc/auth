@@ -57,12 +57,44 @@ test('verify: không trả cột password ra ngoài', function (): void {
     }
 });
 
-test('verify: BASELINE trả về mọi cột khác của bảng (task 3.6 sẽ thu hẹp)', function (): void {
+test('verify: chỉ trả đúng id + name, không lọt cột khác (task 3.6)', function (): void {
     [$conn, $verifier] = cv_setup([['name' => 'user1', 'password' => 'abc123', 'role' => 'admin']]);
     try {
         $user = $verifier->verify('user1', 'abc123');
-        assert_same('admin', $user['role'] ?? null, 'hiện SELECT * nên role lọt ra; sau task 3.6 không còn');
-        assert_true(array_key_exists('full_name', $user), 'full_name cũng lọt ra');
+        assert_same(['id', 'name'], array_keys($user));
+    } finally {
+        drop_user_fixture($conn, CV_TABLE);
+    }
+});
+
+test('verify: tên cột tuỳ biến vẫn trả về khoá id + name (task 3.6)', function (): void {
+    [$conn] = cv_setup([['name' => 'user1', 'password' => 'abc123', 'full_name' => 'login_khac']]);
+    try {
+        $verifier = new CredentialVerifier($conn, ['table' => CV_TABLE, 'userColumn' => 'full_name']);
+        $user = $verifier->verify('login_khac', 'abc123');
+        assert_true(is_array($user), 'đăng nhập bằng cột tuỳ biến');
+        assert_same(['id', 'name'], array_keys($user));
+        assert_same('login_khac', $user['name']);
+    } finally {
+        drop_user_fixture($conn, CV_TABLE);
+    }
+});
+
+test('verify: thiếu cột password là lỗi backend, không âm thầm thành "sai mật khẩu" (task 3.6)', function (): void {
+    [$conn] = cv_setup([['name' => 'user1', 'password' => 'abc123']]);
+    try {
+        $verifier = new CredentialVerifier($conn, ['table' => CV_TABLE, 'passColumn' => 'khong_co']);
+        $caught = null;
+        cv_with_log(function () use ($verifier, &$caught): void {
+            cv_strict_reporting(function () use ($verifier, &$caught): void {
+                try {
+                    $verifier->verify('user1', 'abc123');
+                } catch (Throwable $e) {
+                    $caught = $e;
+                }
+            });
+        });
+        assert_true($caught instanceof AuthBackendException, 'phải là AuthBackendException');
     } finally {
         drop_user_fixture($conn, CV_TABLE);
     }
@@ -115,13 +147,48 @@ test('verify: công tắc nâng cấp BẬT thì plaintext được thay bằng 
     }
 });
 
-test('verify: BASELINE plaintext bắt đầu bằng "$2" bị hiểu nhầm là hash', function (): void {
+test('verify: plaintext bắt đầu bằng "$2" vẫn là plaintext (task 3.5)', function (): void {
     [$conn, $verifier] = cv_setup([['name' => 'user1', 'password' => '$2abc']]);
     try {
-        assert_null(
-            $verifier->verify('user1', '$2abc'),
-            'nhập đúng vẫn không vào được, vì looksHashed() chỉ nhìn tiền tố; task 3.5 dùng password_get_info'
-        );
+        assert_true(is_array($verifier->verify('user1', '$2abc')), 'nhập đúng thì vào được');
+        assert_null($verifier->verify('user1', '$2abd'), 'nhập sai thì không');
+        assert_same('$2abc', fetch_password($conn, CV_TABLE, 'user1'), 'công tắc TẮT: không ghi');
+    } finally {
+        drop_user_fixture($conn, CV_TABLE);
+    }
+});
+
+test('verify: bcrypt dạng $2a$/$2b$ vẫn được nhận là hash (task 3.5)', function (): void {
+    $hash = password_hash('abc123', PASSWORD_BCRYPT);
+    [$conn, $verifier] = cv_setup([
+        ['name' => 'a', 'password' => '$2a$' . substr($hash, 4)],
+        ['name' => 'b', 'password' => '$2b$' . substr($hash, 4)],
+    ]);
+    try {
+        assert_true(is_array($verifier->verify('a', 'abc123')), '$2a$');
+        assert_true(is_array($verifier->verify('b', 'abc123')), '$2b$');
+        assert_null($verifier->verify('a', '$2a$' . substr($hash, 4)), 'gõ nguyên chuỗi hash không vào được');
+    } finally {
+        drop_user_fixture($conn, CV_TABLE);
+    }
+});
+
+test('verify: hash cần rehash chỉ được ghi lại khi công tắc BẬT (task 3.5)', function (): void {
+    $weak = password_hash('abc123', PASSWORD_BCRYPT, ['cost' => 4]);
+    [$conn, $verifier] = cv_setup([['name' => 'user1', 'password' => $weak]]);
+    try {
+        assert_true(is_array($verifier->verify('user1', 'abc123')), 'TẮT: đăng nhập được');
+        assert_same($weak, fetch_password($conn, CV_TABLE, 'user1'), 'TẮT: hash giữ nguyên từng byte');
+
+        $upgrading = new CredentialVerifier($conn, ['table' => CV_TABLE, 'upgradeOnLogin' => true]);
+        assert_null($upgrading->verify('user1', 'sai'), 'BẬT: sai mật khẩu');
+        assert_same($weak, fetch_password($conn, CV_TABLE, 'user1'), 'BẬT + sai mật khẩu: không ghi');
+
+        assert_true(is_array($upgrading->verify('user1', 'abc123')), 'BẬT: đăng nhập được');
+        $stored = (string) fetch_password($conn, CV_TABLE, 'user1');
+        assert_true($stored !== $weak, 'BẬT: hash đã được ghi lại');
+        assert_false(password_needs_rehash($stored, PASSWORD_DEFAULT), 'hash mới đúng cost mặc định');
+        assert_true(password_verify('abc123', $stored), 'hash mới khớp mật khẩu');
     } finally {
         drop_user_fixture($conn, CV_TABLE);
     }

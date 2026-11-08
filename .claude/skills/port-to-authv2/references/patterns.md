@@ -125,9 +125,8 @@ lần lúc login" nữa — phải dựng lại MỖI REQUEST.
 ]))->sync();
 ```
 
-`IdentitySync` chạy một lần/request và `htmlspecialchars` giá trị trước khi ghi. Chỉ dùng khi view
-của dự án in thẳng `$_SESSION[...]` ra HTML — nếu view đã tự escape thì sẽ bị escape hai lần
-(`O'Brien` → `O&#039;Brien` hiện ra màn hình).
+`IdentitySync` chạy một lần/request (mỗi instance) và ghi giá trị **thô** (chỉ `trim`). Chỗ nào của dự án
+in thẳng `$_SESSION[...]` ra HTML thì phải tự `htmlspecialchars` khi in — rà các chỗ đó trước khi dùng.
 
 ### Cách B — cần join bảng khác, hoặc phải giữ giá trị thô
 

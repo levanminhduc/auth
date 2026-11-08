@@ -5,12 +5,7 @@ declare(strict_types=1);
 use Hoatho\SharedAuth\IdentitySync;
 
 /**
- * Chốt hành vi HIỆN TẠI của IdentitySync (golden baseline).
- *
- * Lưu ý về thứ tự: `sync()` dùng `static $done` bên trong một method KHÔNG static, nên cờ đó
- * dùng chung cho cả tiến trình. Một khi có một lần sync() thành công thì MỌI lần gọi sau —
- * kể cả của instance khác — trả về ngay. Vì vậy chỉ có ĐÚNG MỘT test dưới đây gọi sync()
- * thành công, và nó phải là test cuối. Task 3.3 sẽ gỡ ràng buộc này.
+ * Chốt hành vi của IdentitySync.
  */
 
 const IS_TABLE = '_authv2_test_user';
@@ -59,9 +54,9 @@ test('sync: user_id không có trong bảng thì trả false', function (): void
     }
 });
 
-test('sync: ghi vào phiên + 2 BASELINE sai (task 3.3 và 3.4)', function (): void {
-    // Tên có `&` để lộ việc giá trị bị mã hoá HTML ngay lúc GHI vào phiên.
-    $conn = is_setup('user1', 'Nguyễn A & B');
+test('sync: ghi giá trị thô vào phiên, cờ chạy-một-lần theo từng instance (task 3.3 và 3.4)', function (): void {
+    // Tên có `&` và `'` để lộ nếu giá trị bị mã hoá HTML lúc GHI vào phiên.
+    $conn = is_setup('user1', "  Nguyễn A & B'O  ");
     try {
         $id = (int) $conn->insert_id;
 
@@ -72,21 +67,22 @@ test('sync: ghi vào phiên + 2 BASELINE sai (task 3.3 và 3.4)', function (): v
             ]);
             assert_true($first->sync(), 'lần sync đầu chạy');
 
-            assert_same('Nguyễn A &amp; B', $_SESSION['ho_ten'] ?? null,
-                'BASELINE: giá trị bị htmlspecialchars ngay lúc ghi vào phiên; sau task 3.4 phải là "Nguyễn A & B"');
-            assert_same('Nguyễn A &amp; B', $_SESSION['ten_day_du'] ?? null, 'một cột ghi được nhiều key');
+            assert_same("Nguyễn A & B'O", $_SESSION['ho_ten'] ?? null, 'thô, chỉ trim, không htmlspecialchars');
+            assert_same("Nguyễn A & B'O", $_SESSION['ten_day_du'] ?? null, 'một cột ghi được nhiều key');
             assert_same('user', $_SESSION['vai_tro'] ?? null);
 
-            // Instance thứ hai, bản đồ cột khác hẳn.
+            // Cùng instance gọi lại thì không truy vấn nữa: giá trị bị sửa tay vẫn giữ nguyên.
+            $_SESSION['ho_ten'] = 'đã sửa';
+            assert_true($first->sync(), 'lần hai trả true');
+            assert_same('đã sửa', $_SESSION['ho_ten'], 'lần hai không ghi lại');
+
+            // Instance thứ hai, bản đồ cột khác hẳn, phải tự chạy.
             $second = new IdentitySync($conn, [
                 'table'   => IS_TABLE,
                 'columns' => ['name' => 'ten_dang_nhap'],
             ]);
-            assert_true($second->sync(), 'trả true...');
-            assert_false(
-                isset($_SESSION['ten_dang_nhap']),
-                'BASELINE: ...nhưng không ghi gì, vì static $done dùng chung mọi instance; task 3.3 sẽ sửa'
-            );
+            assert_true($second->sync());
+            assert_same('user1', $_SESSION['ten_dang_nhap'] ?? null, 'instance khác không bị cờ của instance đầu chặn');
         });
     } finally {
         drop_user_fixture($conn, IS_TABLE);

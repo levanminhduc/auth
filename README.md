@@ -118,8 +118,9 @@ Dự án **giữ lại**: logic phân quyền (role → menu/permission), app-st
   (đọc bằng `get_cfg_var`, không phụ thuộc biến `TEMP`; tự tạo thư mục nếu chưa có). Đặt `SHARED_AUTH_SESSION_PATH`
   để ghi đè (không tạo/ghi được thư mục thì cũng dừng như production). Thư mục `storage/sessions/` cũ **không còn dùng**
   (nằm trong webroot nên từng truy cập được qua web; file phiên cũ đã xoá).
-- **Production:** cờ `Secure` của cookie hiện vẫn theo từng request (HTTPS/`X-Forwarded-Proto`; cố định theo môi trường
-  là task 2.2, chưa làm); phiên lưu file ở thư mục **riêng** `SHARED_AUTH_SESSION_PATH`.
+- **Production:** cookie **luôn** mang cờ `Secure` (`EnvConfig::cookieSecure()`), bất kể request HTTP hay header
+  `X-Forwarded-Proto` → production **phải chạy HTTPS**, truy cập qua `http://` sẽ không đăng nhập được;
+  phiên lưu file ở thư mục **riêng** `SHARED_AUTH_SESSION_PATH`.
   Thiếu env, hoặc thư mục không tồn tại/không ghi được → **fail-fast**: `RuntimeException`, và
   `prepend.php` trả HTTP 500 trên SAPI web (CLI chạy tiếp). Tuyệt đối không rơi về `save_path` mặc định
   của php.ini, vì thư mục đó dùng chung với mọi vhost khác và GC của app khác sẽ xoá phiên SSO.
@@ -298,7 +299,7 @@ php tests/run.php http     # chỉ smoke HTTP
 ```
 
 PHP thuần, không cần cài gì thêm. Exit code khác 0 khi có test hỏng. Chỉ chạy được bằng CLI: SAPI khác
-trả 404 (tránh lộ test qua web). Trạng thái gần nhất: **160/160 pass** trên cả PHP 8.2 (XAMPP CLI) lẫn 8.3 (PHP mà Apache Laragon chạy) — chạy trên cả hai vì hành vi `password_hash` với byte NUL khác nhau.
+trả 404 (tránh lộ test qua web). Trạng thái gần nhất: **166/166 pass** trên cả PHP 8.2 (XAMPP CLI) lẫn 8.3 (PHP mà Apache Laragon chạy) — chạy trên cả hai vì hành vi `password_hash` với byte NUL khác nhau.
 
 Test cần MySQL sẽ **SKIP** thay vì fail nếu không kết nối được; chỉnh bằng `AUTHV2_TEST_DB_HOST`,
 `AUTHV2_TEST_DB_USER`, `AUTHV2_TEST_DB_PASS`, `AUTHV2_TEST_DB_NAME` (mặc định `localhost`/`root`/rỗng/`mysqli`).
@@ -309,8 +310,8 @@ một user tạm `__authv2_http_test__` vào `user` rồi xoá ở cuối, vì `
 Nhiều khẳng định trong bộ test được đánh dấu `BASELINE` — chúng chốt hành vi **hiện tại** kể cả khi
 hành vi đó sai, để các task của change `auth-hardening` lật chúng một cách có chủ ý. Test `BASELINE`
 chuyển từ xanh sang đỏ là dấu hiệu tốt khi đúng task đó đang được làm, và là dấu hiệu xấu ở mọi lúc khác.
-Đã lật: `sessionSavePath` (2.1), phiên 10 năm (3.8), `Guard::isPublic` với `..`/`%2e%2e` (3.2). Còn lại
-đang chờ: `isSecure` (2.2), `IdentitySync` (3.3, 3.4), `CredentialVerifier` cột thừa (3.6) và tiền tố `$2` (3.5).
+Đã lật hết: `sessionSavePath` (2.1), cookie `Secure` ở production (2.2), phiên 10 năm (3.8), `Guard::isPublic`
+với `..`/`%2e%2e` (3.2), `IdentitySync` (3.3, 3.4), `CredentialVerifier` cột thừa (3.6) và tiền tố `$2` (3.5).
 
 ## Điểm bất biến khi migrate password (đừng đảo thứ tự)
 

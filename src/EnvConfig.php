@@ -32,6 +32,12 @@ final class EnvConfig
             && strtolower((string) $_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https';
     }
 
+    // WHY: production luôn Secure, bất kể request đến qua giao thức nào hay header X-Forwarded-Proto client gửi; một request HTTP lọt vào không được làm cookie SSO đi trần.
+    public static function cookieSecure(): bool
+    {
+        return self::isProduction() || self::isSecure();
+    }
+
     public static function sessionName(): string
     {
         $name = getenv('SHARED_AUTH_SESSION_NAME');
