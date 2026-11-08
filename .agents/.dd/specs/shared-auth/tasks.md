@@ -111,4 +111,15 @@
     này nay ở `RedirectSanitizer` và đã có unit test riêng). Còn tồn: `dev-tools/backups/*` (bản sao lưu
     cũ, có `session_start()` + đọc `$_SESSION['username']`) — thư mục `dev-tools/` bị `.htaccess` chặn
     và nằm trong `.gitignore`, ngoài phạm vi auth.
-- [ ] 5.3 Mỗi dự án www còn lại (chamcong, baonangsuat, ...): chạy `audit-checklist` → tích hợp theo đúng mẫu lichkehoach (nhóm 2), rồi vào chung tiến trình migration
+- [x] 5.3a baonangsuat (nhóm 1, `classes/Auth.php` + `csrf.php` thành shim, 2026-11-08):
+  - `session_start()` chỉ ở 2 điểm → thay bằng `require authV2/bootstrap.php`. `Auth.php` dựng lại bối cảnh
+    (role, nhân viên, LINE) MỖI request từ DB; khoá session do dự án ghi có tiền tố `bns_` (`bns_line`,
+    `bns_csrf_token`) vì phiên giờ dùng chung. `index.php` thành điểm vào (Guard) + hộp chọn LINE; API giữ JSON 401.
+  - Gỡ: `Auth::login/logout`, `ALLOW_PLAINTEXT_PASSWORD`, rate-limit login riêng, form login, remember-username.
+    Đăng xuất là điều hướng trang tới `logout.php` của authV2.
+  - **baonangsuat KHÔNG có điểm GHI `mysqli`.`user`.`password`** (chỉ từng có 1 điểm đọc/so ở `Auth::login`, đã gỡ) → không ảnh hưởng task 3.2.
+  - `EnvConfig::projects()` + `tests/unit/env_config_test.php` += `/baonangsuat/`.
+  - Test: smoke_test 16/16 pass (user có LINE), authV2 unit 166/166, `tests/php/run.php` của baonangsuat 12/12.
+    Production: thêm `/baonangsuat/|Báo năng suất` vào `SHARED_AUTH_PROJECTS`; chạy
+    `SELECT name FROM user WHERE name <> UPPER(TRIM(name))` trước khi bật (`ma_nv` giờ luôn in hoa).
+- [ ] 5.3 Mỗi dự án www còn lại (chamcong, ...): chạy `audit-checklist` → tích hợp theo đúng mẫu lichkehoach (nhóm 2), rồi vào chung tiến trình migration

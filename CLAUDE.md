@@ -6,7 +6,7 @@ When you need to read a specific file but don't know the exact line range, use t
 
 authV2 = package shared-auth (`src/`, namespace `Hoatho\SharedAuth\`) + app login (`public/`). Gom AUTHENTICATION dùng chung cho các dự án cùng host trên Laragon; AUTHORIZATION (role/`vai_tro`) ở lại từng dự án. Package nhận `mysqli` từ ngoài, KHÔNG tự quản DB connection.
 
-Đã tích hợp: **lichkehoach**, **nhansuhtdb** (Giai đoạn 1), **sangkienct**, **khsanxuat** (nhân rộng). Hợp đồng mỗi dự án còn 2 điểm chạm:
+Đã tích hợp: **lichkehoach**, **nhansuhtdb** (Giai đoạn 1), **sangkienct**, **khsanxuat**, **baonangsuat** (nhân rộng). Hợp đồng mỗi dự án còn 2 điểm chạm:
 - `SessionBootstrap::start()` — hoặc `configure()` qua `auto_prepend_file` (`prepend.php`) cho dự án còn nhiều `session_start()` rải rác — thay mọi `session_start()`.
 - `(new Guard($publicPaths))->requireLogin()` thay các check `$_SESSION` rải rác.
 
