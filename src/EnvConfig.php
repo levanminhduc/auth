@@ -97,6 +97,7 @@ final class EnvConfig
                 '/nhansuhtdb/'         => 'Nhân sự HTĐB',
                 '/sangkienct/'         => 'Sáng kiến cải tiến',
                 '/khsanxuat/'          => 'Kế hoạch sản xuất',
+                '/baonangsuat/'        => 'Báo năng suất',
             ];
         }
 

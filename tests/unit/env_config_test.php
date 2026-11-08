@@ -123,6 +123,7 @@ test('projects: mặc định và khi khai báo qua env', function (): void {
                 '/nhansuhtdb/'         => 'Nhân sự HTĐB',
                 '/sangkienct/'         => 'Sáng kiến cải tiến',
                 '/khsanxuat/'          => 'Kế hoạch sản xuất',
+                '/baonangsuat/'        => 'Báo năng suất',
             ],
             EnvConfig::projects(),
             'mặc định gồm đúng các dự án đã tích hợp'
